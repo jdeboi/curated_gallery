@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s http://localhost:8934/sketch.js)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:8934/sketch.js)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:8934/)",
+      "Bash(lsof -ti:8934 -sTCP:LISTEN)",
+      "Bash(node -e \"require\\('playwright'\\); console.log\\('playwright ok'\\)\")",
+      "Bash(node -e \"require\\('puppeteer'\\); console.log\\('puppeteer ok'\\)\")",
+      "Bash(npx --no-install playwright --version)",
+      "Bash(mkdir -p /private/tmp/claude-502/-Users-jdeboisblanc-Projects-curated-left-wall/e969a61d-490a-43e2-921e-10b3a340605c/scratchpad/pwtest)",
+      "Bash(npm init *)",
+      "Bash(node check.js)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:8934/favicon.ico)",
+      "Bash(sips -c 300 300 --cropOffset 700 50 screenshot.png --out crop.png)",
+      "Bash(sips -c 250 250 --cropOffset 400 480 screenshot.png --out crop2.png)",
+      "Bash(sips -c 100 700 --cropOffset 100 20 screenshot.png --out crop3.png)",
+      "Bash(xargs -r kill)",
+      "Bash(curl -sf -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:8934/sketch.js)",
+      "Bash(python3 -c ' *)",
+      "Bash(curl -s https://cdn.jsdelivr.net/gh/jdeboi/p5.mapper@main/dist/p5.mapper.min.js -o /private/tmp/claude-502/-Users-jdeboisblanc-Projects-curated-left-wall/e969a61d-490a-43e2-921e-10b3a340605c/scratchpad/pwtest/p5mapper.min.js)",
+      "Bash(ls -la /private/tmp/claude-502/-Users-jdeboisblanc-Projects-curated-left-wall/e969a61d-490a-43e2-921e-10b3a340605c/scratchpad/pwtest/p5mapper.min.js 2>&1 *)",
+      "Read(//Users/jdeboisblanc/**)",
+      "Read(//Users/jdeboisblanc/Projects/**)"
+    ]
+  }
+}
