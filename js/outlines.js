@@ -1,37 +1,42 @@
 /*
  * Pulsing/expanding outlines for the wing sculptures (bird + 2 butterflies).
  *
- * Each sculpture gets a PolyMap reference surface (see sketch.js), seeded
- * with points sampled directly from its SVG's traced silhouette - not a
- * bounding rectangle - so calibrating it means dragging the actual wing/
- * bird shape onto the physical piece, not fighting a box that doesn't
- * resemble it. p5.mapper's default interaction mode already supports both
- * dragging the whole polygon at once (coarse placement) and dragging
- * individual points (fine-tuning wingtips etc.) without any extra setup.
+ * Each sculpture gets a QuadMap reference surface (see sketch.js), sized
+ * to that SVG's own viewBox so the traced silhouette points - sampled
+ * once from the path and never touched again - sit in the quad's local,
+ * un-warped (0,0)-(width,height) rectangle. Calibrating a shape then just
+ * means corner-pinning that quad (the same 4-handle drag already used for
+ * paintingMaps/quadMap itself) to scale/keystone/position the whole wing
+ * or bird onto the physical piece - no per-point dragging needed, because
+ * the shape is fixed and only the quad's 4 corners move.
  *
- * PolyMap points are plain, unwarped positions (no perspective pinning
- * like QuadMap), so getting a point's real canvas position is just
- * refMap.x + point.x / refMap.y + point.y - same pattern paintings.js
- * uses for its corners. That absolute point is then run through
- * quadMap's own inverse transform to land in quadMap's local drawing
- * space, where the pulsing rings are drawn straight into quadMap's
- * single visible surface - never clipped to a small reference buffer.
+ * refMap.resolveToScreen(localX, localY) is p5.mapper's own forward
+ * perspective-warp primitive (the same one it uses to keystone a texture
+ * onto a QuadMap) - it maps a point from that local rectangle through the
+ * quad's current corner positions to get its true canvas position. That
+ * absolute point is then run through quadMap's own inverse transform to
+ * land in quadMap's local drawing space, where the pulsing rings are
+ * drawn straight into quadMap's single visible surface - never clipped
+ * to a small reference buffer.
  */
 
 const OUTLINE_SPECS = [
-  { name: "bird", file: "assets/bird.svg" },
-  { name: "butterfly0", file: "assets/butterfly0.svg" },
-  { name: "butterfly1", file: "assets/butterfly1.svg" },
+  { name: "bird", file: "assets/bird.svg", width: 322.5, height: 294.49 },
+  { name: "butterfly0", file: "assets/butterfly0.svg", width: 328.97, height: 242.07 },
+  { name: "butterfly1", file: "assets/butterfly1.svg", width: 276.61, height: 272.9 },
 ];
 
 const OUTLINE_LANDMARK_COUNT = 24;
 
 let outlinePaths = [];
 
-// Seeds each butterflyMaps[i] PolyMap from its traced silhouette and
-// resolves once all 3 are ready. Call this - and let it resolve - before
-// pMapper.load(), so a saved calibration can override these seed
-// positions instead of being clobbered by them once the fetch lands.
+// Traces each shape's silhouette into outlinePaths[i], in that SVG's own
+// local coordinate space (matching the QuadMap it's warped through - see
+// butterflyMaps in sketch.js). Nothing here touches the reference surface
+// itself - drawPulsingOutline reads outlinePaths + the surface's current
+// corners together at draw time, so a saved calibration (the quad's 4
+// corners) and the traced shape never fight over the same data the way a
+// PolyMap's own point array would.
 function loadOutlineSVGs() {
   return Promise.all(
     OUTLINE_SPECS.map((spec, i) =>
@@ -40,7 +45,6 @@ function loadOutlineSVGs() {
         .then((svgText) => tracePathPoints(svgText, OUTLINE_LANDMARK_COUNT))
         .then((points) => {
           outlinePaths[i] = points;
-          butterflyMaps[i].setPoints(points);
         })
         .catch((err) => console.error("Failed to load outline SVG:", spec.file, err)),
     ),
@@ -73,9 +77,10 @@ function tracePathPoints(svgText, numPoints) {
 function drawPulsingOutline(pg, index, refMap) {
   if (!outlinePaths[index]) return;
 
-  const localPoints = refMap.points.map((p) =>
-    quadMap.getTransformedCursor(refMap.x + p.x, refMap.y + p.y),
-  );
+  const localPoints = outlinePaths[index].map((p) => {
+    const screenPoint = refMap.resolveToScreen(p.x, p.y);
+    return quadMap.getTransformedCursor(screenPoint.x, screenPoint.y);
+  });
   const centroid = polygonCentroid(localPoints);
   const osc = pMapper.getOscillator(3);
 

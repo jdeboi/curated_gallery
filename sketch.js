@@ -46,17 +46,20 @@ function setup() {
   paintingMaps[3] = pMapper.createQuadMap(180, 250, 2);
   paintingMaps[4] = pMapper.createQuadMap(180, 250, 2);
 
-  OUTLINE_SPECS.forEach(() => {
-    butterflyMaps.push(pMapper.createPolyMap(OUTLINE_LANDMARK_COUNT));
+  // Each outline gets a QuadMap sized to its own SVG viewBox, used purely
+  // as a corner-pin frame - see js/outlines.js for why the traced shape
+  // itself lives separately in outlinePaths rather than on the surface.
+  OUTLINE_SPECS.forEach((spec) => {
+    butterflyMaps.push(pMapper.createQuadMap(spec.width, spec.height, 2));
   });
 
   initParticles();
   initMycelium();
 
-  // Seed the butterfly/bird PolyMaps from their traced SVGs, then load
-  // calibration - in that order, so a saved map.json can override these
-  // seed positions instead of being overwritten by them once the SVG
-  // fetches land (see js/outlines.js).
+  // Trace the butterfly/bird SVGs, then load calibration - in that order,
+  // so pMapper.load() has butterflyMaps' QuadMaps ready to receive their
+  // saved corner positions (see js/outlines.js for how the traced shape
+  // and the corner-pin calibration stay independent of each other).
   loadOutlineSVGs().then(() => {
     pMapper.load("maps/map.json", () => {
       // Reflects whatever was actually saved (paintings/outlines may or may
@@ -90,13 +93,13 @@ function draw() {
     if (mode === "mycelium") drawMycelium(pg);
     if (mode === "fireflies") drawParticles(pg);
     drawPaintings(pg);
-    // butterflyMaps.forEach((refMap, i) => drawPulsingOutline(pg, i, refMap));
+    butterflyMaps.forEach((refMap, i) => drawPulsingOutline(pg, i, refMap));
   });
 
   // Reference-only surfaces: draw nothing, but keep them "displayed" every
   // frame so their corner handles still drag in calibration mode.
   // paintingMaps.forEach((pm) => pm.displaySketch(() => {}));
-  // butterflyMaps.forEach((bm) => bm.displaySketch(() => {}));
+  butterflyMaps.forEach((bm) => bm.displaySketch(() => {}));
 }
 
 function keyPressed() {
