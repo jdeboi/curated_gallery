@@ -1,0 +1,155 @@
+/*
+ * Show orchestration: cycles the wall through a sequence of scenes.
+ *
+ * Which scene is live is derived from the system clock (Date.now()),
+ * not from when this page happened to load - the whole SCENES list has
+ * a fixed total duration, and "now mod that total" gives a timeline
+ * position every independently-running instance agrees on, as long as
+ * their clocks are in sync (NTP). That's what lets a second wall, with
+ * no network link to this one, run the same show in step: same code,
+ * same SCENES durations, same wall-clock second -> same scene index and
+ * the same elapsed-in-scene offset.
+ *
+ * This syncs *timing* only - which scene, and how far into its
+ * duration - not the generative content itself. Each scene's own
+ * random growth/particle motion still runs its own independent
+ * unseeded randomness per process, so e.g. the mycelium branches will
+ * be in different specific shapes on each wall even though both are
+ * "40% through the mycelium scene" at the same moment. Getting the
+ * actual pixels to match too would mean seeding each scene's RNG from
+ * the clock as well and switching their per-frame growth to a
+ * fixed-timestep sim (so frame-rate differences between the two
+ * machines don't desync the random call sequence) - a bigger change,
+ * worth doing as a follow-up if the two walls need to look pixel-
+ * identical rather than just "same scene, same phase."
+ *
+ * Each entry owns its own init/update/draw triplet and is otherwise
+ * unaware of the others - the manager here only decides which one is
+ * live. Entering a scene always calls its init() so switching mid-show
+ * (auto-advance or manual) never leaves stale state (a half-grown
+ * mycelium network, drifting emanate particles) bleeding into the next
+ * scene; each scene restarts its own arc from empty every time it comes
+ * up. A page that loads mid-scene (e.g. a wall computer rebooted
+ * mid-show) will start that scene from empty too, rather than fast-
+ * forwarding visually to where it "should" be - it'll be back in phase
+ * with the other wall at the next scene boundary, same fixed-timestep
+ * work as above would be needed to catch a scene up instantly.
+ *
+ * The pulsing wing outlines (js/outlines.js) and painting glow
+ * (js/paintings.js) are drawn on top of every scene in sketch.js's
+ * draw(), not listed here - they're the installation's constant
+ * signature, not a scene of their own.
+ */
+
+const SCENES = [
+  {
+    name: "mycelium",
+    duration: 45000,
+    init: initMycelium,
+    update: updateMycelium,
+    draw: drawMycelium,
+  },
+  {
+    name: "emanate",
+    duration: 40000,
+    init: initEmanate,
+    update: updateEmanate,
+    draw: drawEmanate,
+  },
+  {
+    name: "fireflies",
+    duration: 35000,
+    init: initParticles,
+    update: updateParticles,
+    draw: drawParticles,
+  },
+];
+
+const SHOW_TOTAL_DURATION = SCENES.reduce((sum, s) => sum + s.duration, 0);
+
+let sceneIndex = 0;
+let showPlaying = true;
+let lastElapsedInScene = 0; // for the status readout only
+
+function currentScene() {
+  return SCENES[sceneIndex];
+}
+
+// Maps a moment in wall-clock time to a scene index + how far into that
+// scene's duration it falls - the one piece of math every instance needs
+// to agree on for the show to stay in step without a network link.
+function computeShowPosition(nowMs) {
+  let t = nowMs % SHOW_TOTAL_DURATION;
+  for (let i = 0; i < SCENES.length; i++) {
+    if (t < SCENES[i].duration) return { sceneIndex: i, elapsedInScene: t };
+    t -= SCENES[i].duration;
+  }
+  // Floating-point edge case at the exact wraparound instant.
+  const last = SCENES.length - 1;
+  return { sceneIndex: last, elapsedInScene: SCENES[last].duration - 1 };
+}
+
+function enterScene(index) {
+  sceneIndex = ((index % SCENES.length) + SCENES.length) % SCENES.length;
+  currentScene().init();
+}
+
+function initShow() {
+  showPlaying = true;
+  const pos = computeShowPosition(Date.now());
+  enterScene(pos.sceneIndex);
+  lastElapsedInScene = pos.elapsedInScene;
+}
+
+// Arrow-key scene changes are a local preview/calibration override - they
+// stop following the wall clock so you can sit on one scene as long as
+// you like. Space resumes clock-following, snapping back to wherever the
+// schedule says the show should be right now (see toggleShowPlaying).
+function nextScene() {
+  showPlaying = false;
+  enterScene(sceneIndex + 1);
+}
+
+function previousScene() {
+  showPlaying = false;
+  enterScene(sceneIndex - 1);
+}
+
+function toggleShowPlaying() {
+  showPlaying = !showPlaying;
+  if (showPlaying) {
+    const pos = computeShowPosition(Date.now());
+    enterScene(pos.sceneIndex);
+    lastElapsedInScene = pos.elapsedInScene;
+  }
+}
+
+function updateShow() {
+  if (showPlaying) {
+    const pos = computeShowPosition(Date.now());
+    if (pos.sceneIndex !== sceneIndex) enterScene(pos.sceneIndex);
+    lastElapsedInScene = pos.elapsedInScene;
+  }
+  currentScene().update();
+}
+
+function drawShow(pg) {
+  currentScene().draw(pg);
+}
+
+function displayShowStatus() {
+  if (!myFont) return;
+
+  const scene = currentScene();
+  const status = showPlaying
+    ? `${Math.max(0, Math.ceil((scene.duration - lastElapsedInScene) / 1000))}s`
+    : "manual";
+
+  fill(255);
+  noStroke();
+  text(
+    `scene: ${scene.name} (${status}) — arrows to switch, space to ${showPlaying ? "pause" : "sync & play"}`,
+    -width / 2 + 15,
+    -height / 2 + 100,
+  );
+}

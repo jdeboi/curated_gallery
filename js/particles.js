@@ -1,14 +1,15 @@
 /*
  * Floating particle system for the grass layer.
  *
- * Particles live in quadMap's local drawing space (0..870 x 0..700) -
- * the same unwarped space paintings.js expresses painting geometry in -
- * so collision against painting bounds is a same-space check with no
- * extra coordinate conversion.
+ * Particles live in the wall's shared logical drawing space (WALL_BOUNDS,
+ * see js/wall.js) - the same space paintings.js expresses painting
+ * geometry in - so collision against painting bounds is a same-space
+ * check with no extra coordinate conversion. On a multi-panel wall this
+ * space spans every panel, so particles drift across the seam between
+ * them rather than being confined to one.
  */
 
 const PARTICLE_COUNT = 80;
-const PARTICLE_BOUNDS = { w: 870, h: 700 };
 
 let particles = [];
 
@@ -18,8 +19,8 @@ class Particle {
   }
 
   reset() {
-    this.x = random(PARTICLE_BOUNDS.w);
-    this.y = random(PARTICLE_BOUNDS.h);
+    this.x = random(WALL_BOUNDS.w);
+    this.y = random(WALL_BOUNDS.h);
     this.vx = random(-0.3, 0.3);
     this.vy = random(-0.3, 0.3);
     this.size = random(7, 14);
@@ -42,10 +43,10 @@ class Particle {
 
     resolveCollisions(this, paintingBounds);
 
-    if (this.x < 0) this.x = PARTICLE_BOUNDS.w;
-    if (this.x > PARTICLE_BOUNDS.w) this.x = 0;
-    if (this.y < 0) this.y = PARTICLE_BOUNDS.h;
-    if (this.y > PARTICLE_BOUNDS.h) this.y = 0;
+    if (this.x < 0) this.x = WALL_BOUNDS.w;
+    if (this.x > WALL_BOUNDS.w) this.x = 0;
+    if (this.y < 0) this.y = WALL_BOUNDS.h;
+    if (this.y > WALL_BOUNDS.h) this.y = 0;
   }
 
   display(pg) {

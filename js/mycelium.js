@@ -1,20 +1,21 @@
 /*
  * Thick mycelium growth for the grass layer.
  *
- * Branches grow in quadMap's local drawing space (0..870 x 0..700) - the
- * same space paintings.js expresses painting geometry in - bouncing back
- * inward at the wall edges, and steering away from painting polygons
- * (inflated slightly via polygonCentroid, same trick drawPaintingGlow
- * uses) so hyphae wrap around frames rather than crossing them. Each
- * branch is rendered as a single tapered ribbon polygon (thick at the
- * root, thinning toward the tip), filled solid opaque white so it reads
- * clearly against the dark wall.
+ * Branches grow in the wall's shared logical drawing space (WALL_BOUNDS,
+ * see js/wall.js) - the same space paintings.js expresses painting
+ * geometry in - bouncing back inward at the wall edges, and steering
+ * away from painting polygons (inflated slightly via polygonCentroid,
+ * same trick drawPaintingGlow uses) so hyphae wrap around frames rather
+ * than crossing them. On a multi-panel wall this space spans every
+ * panel, so a branch can grow right across the seam from one physical
+ * panel into the next. Each branch is rendered as a single tapered
+ * ribbon polygon (thick at the root, thinning toward the tip), filled
+ * solid opaque white so it reads clearly against the dark wall.
  *
  * Growth is frame-gated (see MYCELIUM_FRAME_INTERVAL) rather than
  * stepping every frame, so the spread is slow enough to actually watch.
  */
 
-const MYCELIUM_BOUNDS = { w: 870, h: 700 };
 const MYCELIUM_STEP = 2.2;
 const MYCELIUM_FRAME_INTERVAL = 2; // advance growth once every N frames
 const MYCELIUM_ROOT_INTERVAL = 200; // frames between new root sprouts
@@ -47,11 +48,11 @@ class MyceliumBranch {
     // Bounce back inward off the wall edges instead of dying there, so
     // growth keeps spreading across the whole surface.
     let next = myceliumNextPoint(tip, angle);
-    if (next.x < 6 || next.x > MYCELIUM_BOUNDS.w - 6) {
+    if (next.x < 6 || next.x > WALL_BOUNDS.w - 6) {
       angle = PI - angle;
       next = myceliumNextPoint(tip, angle);
     }
-    if (next.y < 6 || next.y > MYCELIUM_BOUNDS.h - 6) {
+    if (next.y < 6 || next.y > WALL_BOUNDS.h - 6) {
       angle = -angle;
       next = myceliumNextPoint(tip, angle);
     }
@@ -124,9 +125,9 @@ function myceliumNextPoint(p, angle) {
 function myceliumInBounds(p) {
   return (
     p.x >= 6 &&
-    p.x <= MYCELIUM_BOUNDS.w - 6 &&
+    p.x <= WALL_BOUNDS.w - 6 &&
     p.y >= 6 &&
-    p.y <= MYCELIUM_BOUNDS.h - 6
+    p.y <= WALL_BOUNDS.h - 6
   );
 }
 
@@ -151,16 +152,16 @@ function myceliumSpawnRoot() {
   const edge = random();
   let x, y, angle;
   if (edge < 0.6) {
-    x = random(MYCELIUM_BOUNDS.w);
-    y = MYCELIUM_BOUNDS.h - random(5, 30);
+    x = random(WALL_BOUNDS.w);
+    y = WALL_BOUNDS.h - random(5, 30);
     angle = -HALF_PI + random(-0.6, 0.6);
   } else if (edge < 0.8) {
     x = random(5, 30);
-    y = random(MYCELIUM_BOUNDS.h);
+    y = random(WALL_BOUNDS.h);
     angle = random(-0.6, 0.6);
   } else {
-    x = MYCELIUM_BOUNDS.w - random(5, 30);
-    y = random(MYCELIUM_BOUNDS.h);
+    x = WALL_BOUNDS.w - random(5, 30);
+    y = random(WALL_BOUNDS.h);
     angle = PI + random(-0.6, 0.6);
   }
   myceliumBranches.push(new MyceliumBranch(x, y, angle, random(9, 15), 0));

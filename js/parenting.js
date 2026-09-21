@@ -1,14 +1,19 @@
 /*
- * Locking/unlocking the painting + outline reference surfaces to the main
- * wall quadMap.
+ * Locking/unlocking the painting + outline reference surfaces to
+ * whichever wall panel each is physically corner-pinned against.
  *
  * paintingMaps/butterflyMaps are calibrated in absolute screen space (see
- * sketch.js) so each one can be corner-pinned independently onto its
- * physical painting/sculpture. Once that per-piece calibration is done,
- * locking re-expresses every one of those surfaces relative to quadMap's
- * own local (pre-warp) space via p5.mapper's built-in setParent(). After
- * that, moving/re-keystoning quadMap alone (e.g. because the projector got
- * bumped) carries every painting along with it automatically.
+ * each wall's sketch.js) so each one can be corner-pinned independently
+ * onto its physical painting/sculpture. Once that per-piece calibration
+ * is done, locking re-expresses every one of those surfaces relative to
+ * its own panel's local (pre-warp) space via p5.mapper's built-in
+ * setParent() - resolvePanelIndex() (see js/wall.js) works out which panel
+ * that is from each surface's own calibrated position, rather than a
+ * hand-declared index. After that, moving/re-keystoning
+ * a panel alone (e.g. because the projector got bumped) carries every
+ * painting/outline mounted on it along automatically - on a multi-panel
+ * wall, only that panel's own pieces move, since each is parented to its
+ * own panel rather than to the wall as a whole.
  *
  * Unlocking (setParent(null)) freezes each surface's current resolved
  * position back into its own absolute coordinates - nothing jumps - and
@@ -22,12 +27,22 @@
 let parentingLocked = false;
 
 function getParentableSurfaces() {
-  return [...paintingMaps, ...butterflyMaps];
+  return [
+    ...paintingMaps.map((surface) => ({
+      surface,
+      panel: resolvePanelIndex(surface),
+    })),
+    ...butterflyMaps.map((surface) => ({
+      surface,
+      panel: resolvePanelIndex(surface),
+    })),
+  ];
 }
 
 function setParentingLocked(locked) {
-  const parent = locked ? quadMap : null;
-  getParentableSurfaces().forEach((surface) => surface.setParent(parent));
+  getParentableSurfaces().forEach(({ surface, panel }) => {
+    surface.setParent(locked ? wallPanels[panel].map : null);
+  });
   parentingLocked = locked;
 }
 
@@ -41,7 +56,8 @@ function toggleParentingLocked() {
 function syncParentingLockFromLoadedState() {
   const surfaces = getParentableSurfaces();
   parentingLocked =
-    surfaces.length > 0 && surfaces.every((s) => s.getParent() === quadMap);
+    surfaces.length > 0 &&
+    surfaces.every(({ surface, panel }) => surface.getParent() === wallPanels[panel].map);
 }
 
 function displayParentingStatus() {

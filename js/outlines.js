@@ -1,30 +1,30 @@
 /*
- * Pulsing/expanding outlines for the wing sculptures (bird + 2 butterflies).
+ * Pulsing/expanding outlines for wing sculptures (e.g. left wall's bird +
+ * 2 butterflies). Which sculptures exist, their SVGs, and which wall
+ * panel each is physically mounted on is wall-specific data - that lives
+ * in OUTLINE_SPECS, defined by each wall's own sketch.js (an empty list
+ * is fine for a wall with no sculptures, e.g. the right wall).
  *
- * Each sculpture gets a QuadMap reference surface (see sketch.js), sized
- * to that SVG's own viewBox so the traced silhouette points - sampled
- * once from the path and never touched again - sit in the quad's local,
- * un-warped (0,0)-(width,height) rectangle. Calibrating a shape then just
- * means corner-pinning that quad (the same 4-handle drag already used for
- * paintingMaps/quadMap itself) to scale/keystone/position the whole wing
- * or bird onto the physical piece - no per-point dragging needed, because
- * the shape is fixed and only the quad's 4 corners move.
+ * Each sculpture gets a QuadMap reference surface (see each wall's
+ * sketch.js), sized to that SVG's own viewBox so the traced silhouette
+ * points - sampled once from the path and never touched again - sit in
+ * the quad's local, un-warped (0,0)-(width,height) rectangle. Calibrating
+ * a shape then just means corner-pinning that quad (the same 4-handle
+ * drag already used for paintingMaps/the wall's panels) to
+ * scale/keystone/position the whole wing or bird onto the physical piece
+ * - no per-point dragging needed, because the shape is fixed and only
+ * the quad's 4 corners move.
  *
  * refMap.resolveToScreen(localX, localY) is p5.mapper's own forward
  * perspective-warp primitive (the same one it uses to keystone a texture
  * onto a QuadMap) - it maps a point from that local rectangle through the
  * quad's current corner positions to get its true canvas position. That
- * absolute point is then run through quadMap's own inverse transform to
- * land in quadMap's local drawing space, where the pulsing rings are
- * drawn straight into quadMap's single visible surface - never clipped
- * to a small reference buffer.
+ * absolute point is then run through the inverse transform of whichever
+ * wall panel this outline is physically sitting on - resolvePanelIndex()
+ * (see js/wall.js) works that out from refMap's own calibrated position,
+ * rather than a hand-declared index - to land in the wall's shared logical
+ * drawing space, where the pulsing rings are drawn.
  */
-
-const OUTLINE_SPECS = [
-  { name: "bird", file: "assets/bird.svg", width: 322.5, height: 294.49 },
-  { name: "butterfly0", file: "assets/butterfly0.svg", width: 328.97, height: 242.07 },
-  { name: "butterfly1", file: "assets/butterfly1.svg", width: 276.61, height: 272.9 },
-];
 
 const OUTLINE_LANDMARK_COUNT = 24;
 
@@ -77,9 +77,10 @@ function tracePathPoints(svgText, numPoints) {
 function drawPulsingOutline(pg, index, refMap) {
   if (!outlinePaths[index]) return;
 
+  const panel = resolvePanelIndex(refMap);
   const localPoints = outlinePaths[index].map((p) => {
     const screenPoint = refMap.resolveToScreen(p.x, p.y);
-    return quadMap.getTransformedCursor(screenPoint.x, screenPoint.y);
+    return panelToLogical(panel, screenPoint.x, screenPoint.y);
   });
   const centroid = polygonCentroid(localPoints);
   const osc = pMapper.getOscillator(3);

@@ -2,23 +2,47 @@
  * Painting location tracking + illumination.
  *
  * Each paintingMap is an independently corner-pinned QuadMap that never
- * draws visible content itself (see sketch.js) - it exists purely so its
- * calibrated corners can be read back. getControlPoints() returns each
- * corner's position local to that surface's own (x, y) translation, so
- * pm.x/pm.y must be added back in to get real canvas-space points (this
- * mirrors how p5.mapper itself renders control points: it translates by
- * (x, y) before drawing them). Those absolute points are then run
- * through quadMap's own inverse transform, giving each painting's quad
- * in quadMap's local drawing space - the same space everything visible
- * gets drawn in.
+ * draws visible content itself (see each wall's sketch.js) - it exists
+ * purely so its calibrated corners can be read back. getControlPoints()
+ * returns each corner's position local to that surface's own (x, y)
+ * translation, so pm.x/pm.y must be added back in to get real
+ * canvas-space points (this mirrors how p5.mapper itself renders control
+ * points: it translates by (x, y) before drawing them). Those absolute
+ * points are then run through the inverse transform of whichever wall
+ * panel that painting is physically sitting on - resolvePanelIndex() (see
+ * js/wall.js) works that out from the painting's own calibrated position,
+ * rather than a hand-declared index - giving each painting's quad in the
+ * wall's shared logical drawing space - the same space everything visible
+ * gets drawn in, regardless of how many physical panels the wall is split
+ * across.
+ *
+ * This is genuinely expensive per painting (a point-in-polygon panel
+ * lookup plus a perspective-inverse transform per corner) and, on a
+ * multi-panel wall, gets called several times in the same frame with an
+ * identical answer every time - once per panel from displayWall()'s own
+ * per-panel drawPaintings() call (drawing the *same* logical-space
+ * polygon into each panel's own buffer), plus again from emanate.js's
+ * no-outlines fallback and particles.js's getPaintingBounds(). Cached per
+ * frame (keyed on p5's frameCount, which only advances outside
+ * calibration dragging anyway) so all of those share one computation
+ * instead of repeating it - the pre-cache version of this straight-up
+ * showed up as a framerate drop on the right wall's 13-painting/3-panel
+ * config.
  */
+let _paintingPolygonsCache = null;
+let _paintingPolygonsCacheFrame = -1;
 
 function getPaintingPolygons() {
-  return paintingMaps.map((pm) =>
-    pm
+  if (_paintingPolygonsCacheFrame === frameCount) return _paintingPolygonsCache;
+
+  _paintingPolygonsCache = paintingMaps.map((pm) => {
+    const panel = resolvePanelIndex(pm);
+    return pm
       .getControlPoints()
-      .map((cp) => quadMap.getTransformedCursor(pm.x + cp.x, pm.y + cp.y)),
-  );
+      .map((cp) => panelToLogical(panel, pm.x + cp.x, pm.y + cp.y));
+  });
+  _paintingPolygonsCacheFrame = frameCount;
+  return _paintingPolygonsCache;
 }
 
 function getPaintingBounds() {
