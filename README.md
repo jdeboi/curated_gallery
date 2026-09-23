@@ -5,9 +5,11 @@ Projection mapping installations for walls of curated paintings, built on
 multiple walls - **left wall** (one flat surface) and **right wall**
 (three flat panels, because that wall physically curves) - sharing one
 engine: a timed show that cycles through generative scenes (mycelium
-growth, shapes emanating from wing sculptures/paintings, fireflies) while
-pulsing bird/butterfly outlines and painting-shaped glow/spotlight effects
-stay on constantly, corner-pinned to each wall's projector(s).
+growth, rippling wing-sculpture outlines, fireflies, a snake), while
+bird/butterfly outlines and painting-shaped glow/spotlight effects sit lit
+underneath every scene (filled by default, but each scene can set its own
+look - see "Light states" below), corner-pinned to each wall's
+projector(s).
 
 Two independently-running walls (no network between them) still land on
 the same scene at the same time, because the show schedule is derived
@@ -53,7 +55,8 @@ wall has. Each wall supplies that as data in its own `js/<wall>/sketch.js`:
   becomes a `QuadMap` (`butterflyMaps[]`), seeded from the traced SVG
   silhouette rather than a bounding box, so calibrating it means
   dragging the real wing/bird shape onto the physical piece. Read back
-  by `js/outlines.js` to draw the pulsing rings.
+  by `js/outlines.js` to draw its lit state each scene, plus the
+  rippling-outline animation during the "emanate" scene.
 
 This split exists so each painting/sculpture/panel can be calibrated
 independently while all the actual rendering happens in a shared
@@ -74,19 +77,43 @@ walls, just the scene and its phase.
 Current scenes:
 
 - **mycelium** (`js/mycelium.js`) - branching hyphae growth.
-- **emanate** (`js/emanate.js`) - spore-like shapes drifting outward from
-  the wing sculptures, or from paintings on a wall with no sculptures.
+- **emanate** (`js/outlines.js`'s `drawEmanateRipples`) - thick copies of
+  each wing sculpture's silhouette rippling outward until they've crossed
+  the whole wall, layered on top of the sculptures' normal lit state
+  (filled by default).
 - **fireflies** (`js/particles.js`) - floating pulsing particles.
+- **snake** (`js/snake.js`) - a growing snake that eats its way around the
+  wall.
 
 To add a scene: give it its own `js/whatever.js` with `initX()`,
 `updateX()`, `drawX(pg)`, add a script tag in each wall's `.html` (before
 `js/scenes.js`), and add `{ name, duration, init: initX, update: updateX,
-draw: drawX }` to `SCENES` in `js/scenes.js` (shared by every wall).
+draw: drawX }` to `SCENES` in `js/scenes.js` (shared by every wall). A
+scene entry can also set `butterflyState`/`paintingState` - see "Light
+states" below.
 
 | Key | Action |
 | --- | --- |
 | `→` / `←` | Next / previous scene - a local preview override, stops following the clock |
 | `space` | Resume following the clock (snaps to wherever the schedule says "now" is) / pause |
+
+## Light states
+
+Wing sculptures and paintings both render through one shared vocabulary
+(`js/lightState.js`): `"filled"` (solid), `"outline"` (stroke only),
+`"off"`, or a `{ mode: "pulse" | "switch", states: [...], period }`
+descriptor that crossfades (`pulse`) or hard-cuts (`switch`) between two
+or more of those over `period` seconds. Each `SCENES` entry in
+`js/scenes.js` can set its own `butterflyState` and/or `paintingState`;
+leaving either unset defaults to `"filled"` ("all illuminated"). This is
+independent of a scene's own `init`/`update`/`draw` - e.g. "emanate"'s
+ripple animation plays on top of whatever `butterflyState` resolves to,
+rather than being that state itself.
+
+`q` / `w` (see keybindings below) cycle a manual `auto → filled → outline
+→ off` override for butterflies/paintings respectively, for previewing a
+look without sitting through a specific scene - `auto` (the default)
+defers back to whatever the live scene declares.
 
 ## Calibration workflow
 
@@ -110,7 +137,8 @@ Keybindings (see `keyPressed()` in each wall's `sketch.js`):
 | `s` | Save calibration (downloads a JSON file - see step 5 above) |
 | `l` | Reload calibration from `maps/<wall>/map.json` |
 | `f` | Toggle fullscreen |
-| `i` | Cycle painting light mode (on / glow / outline) |
+| `q` | Cycle butterfly light override (auto / filled / outline / off) |
+| `w` | Cycle painting light override (auto / filled / outline / off) |
 
 ## Parenting: keeping paintings aligned when a panel moves
 
@@ -195,14 +223,17 @@ No engine file (`js/*.js` outside the per-wall folders) needs touching.
   wall-specific code.
 - `js/wall.js` - the multi-panel/logical-space abstraction (`wallPanels`,
   `WALL_BOUNDS`, `panelToLogical()`, `displayWall()`).
+- `js/lightState.js` - shared filled/outline/off (+ pulse/switch)
+  rendering vocabulary used by both paintings and wing sculptures.
 - `js/paintings.js` - reads painting quad corners back into polygons
-  (in the shared logical space), draws the glow/spotlight effects.
+  (in the shared logical space), draws their lit state + glow/spotlight
+  effect.
 - `js/outlines.js` - loads/traces wing-sculpture SVGs into `PolyMap`
-  points, draws the pulsing outlines.
+  points, draws their lit state every scene plus the "emanate" scene's
+  rippling-outline animation.
 - `js/particles.js` - the "fireflies" scene's floating particle system.
 - `js/mycelium.js` - the "mycelium" scene's branching growth.
-- `js/emanate.js` - the "emanate" scene's shapes drifting off wing
-  sculptures (or paintings, if a wall has none).
+- `js/snake.js` - the "snake" scene.
 - `js/scenes.js` - the show: scene list, clock-driven scheduling,
   play/pause.
 - `js/parenting.js` - lock/unlock helpers wiring each painting/outline to

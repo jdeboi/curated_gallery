@@ -2,11 +2,12 @@
  * Thick mycelium growth for the grass layer.
  *
  * Branches grow in the wall's shared logical drawing space (WALL_BOUNDS,
- * see js/wall.js) - the same space paintings.js expresses painting
- * geometry in - bouncing back inward at the wall edges, and steering
- * away from painting polygons (inflated slightly via polygonCentroid,
- * same trick drawPaintingGlow uses) so hyphae wrap around frames rather
- * than crossing them. On a multi-panel wall this space spans every
+ * see js/wall.js) - the same space paintings.js/outlines.js express
+ * painting and wing-sculpture geometry in - bouncing back inward at the
+ * wall edges, and steering away from those polygons (inflated slightly via
+ * polygonCentroid, same trick drawPaintingGlow uses) so hyphae wrap around
+ * frames/sculptures rather than crossing them. On a multi-panel wall this
+ * space spans every
  * panel, so a branch can grow right across the seam from one physical
  * panel into the next. Each branch is rendered as a single tapered
  * ribbon polygon (thick at the root, thinning toward the tip), filled
@@ -139,13 +140,15 @@ function myceliumBlocked(p, obstacles) {
 }
 
 function myceliumObstacles() {
-  return getPaintingPolygons().map((poly) => {
-    const c = polygonCentroid(poly);
-    return poly.map((p) => ({
-      x: c.x + (p.x - c.x) * MYCELIUM_OBSTACLE_SCALE,
-      y: c.y + (p.y - c.y) * MYCELIUM_OBSTACLE_SCALE,
-    }));
-  });
+  return getPaintingPolygons()
+    .concat(getOutlinePolygons())
+    .map((poly) => {
+      const c = polygonCentroid(poly);
+      return poly.map((p) => ({
+        x: c.x + (p.x - c.x) * MYCELIUM_OBSTACLE_SCALE,
+        y: c.y + (p.y - c.y) * MYCELIUM_OBSTACLE_SCALE,
+      }));
+    });
 }
 
 function myceliumSpawnRoot() {

@@ -21,8 +21,8 @@
  * multi-panel wall, gets called several times in the same frame with an
  * identical answer every time - once per panel from displayWall()'s own
  * per-panel drawPaintings() call (drawing the *same* logical-space
- * polygon into each panel's own buffer), plus again from emanate.js's
- * no-outlines fallback and particles.js's getPaintingBounds(). Cached per
+ * polygon into each panel's own buffer), plus again from
+ * particles.js's getPaintingBounds(). Cached per
  * frame (keyed on p5's frameCount, which only advances outside
  * calibration dragging anyway) so all of those share one computation
  * instead of repeating it - the pre-cache version of this straight-up
@@ -124,28 +124,40 @@ function drawPaintingGlow(pg, poly) {
   }
 }
 
-const PAINTING_LIGHT_MODES = ["on", "glow", "outline"];
-let paintingLightMode = "on";
+// A painting's lit state normally comes from the live scene's own
+// `paintingState` (js/scenes.js; unset means LIGHT_STATE_DEFAULT - see
+// js/lightState.js), same mechanism as the wing sculptures in
+// js/outlines.js (whose analogous override is "q" - see
+// cycleButterflyLightMode()). "w" cycles a manual override on top of this
+// one, for previewing a look (e.g. checking corner-pin alignment in
+// "outline") without needing to sit through a specific scene - "auto"
+// (the default) defers back to whatever the current scene declares.
+const PAINTING_LIGHT_OVERRIDES = ["auto", "filled", "outline", "off"];
+let paintingLightOverride = "auto";
 
 function cyclePaintingLightMode() {
-  const idx = PAINTING_LIGHT_MODES.indexOf(paintingLightMode);
-  paintingLightMode = PAINTING_LIGHT_MODES[(idx + 1) % PAINTING_LIGHT_MODES.length];
+  const idx = PAINTING_LIGHT_OVERRIDES.indexOf(paintingLightOverride);
+  paintingLightOverride =
+    PAINTING_LIGHT_OVERRIDES[(idx + 1) % PAINTING_LIGHT_OVERRIDES.length];
+}
+
+function currentPaintingState() {
+  return paintingLightOverride === "auto"
+    ? currentScene().paintingState
+    : paintingLightOverride;
 }
 
 function drawPaintings(pg) {
+  const resolved = resolveLightState(currentPaintingState());
+  // "off" is an opaque *black* fill (see js/lightState.js), not the
+  // absence of one - only count it as lit, and worth a glow halo, when
+  // there's actually light-colored fill/stroke showing.
+  const lit =
+    (resolved.fillAlpha > 0 && resolved.fillColor > 0) ||
+    resolved.strokeAlpha > 0;
+
   getPaintingPolygons().forEach((poly) => {
-    if (paintingLightMode === "outline") {
-      drawPolygon(pg, poly, { strokeColor: pg.color(255), weight: 3 });
-      return;
-    }
-
-    drawPaintingGlow(pg, poly);
-
-    if (paintingLightMode === "glow") {
-      const osc = pMapper.getOscillator(4);
-      drawPolygon(pg, poly, { fillColor: pg.color(255, 180 + osc * 75) });
-    } else {
-      drawPolygon(pg, poly, { fillColor: pg.color(255) });
-    }
+    if (lit) drawPaintingGlow(pg, poly);
+    drawLightShape(pg, poly, resolved, { strokeWeight: 3 });
   });
 }

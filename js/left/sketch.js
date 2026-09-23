@@ -4,7 +4,7 @@
  * This is the only wall-specific file for left wall: it declares its
  * paintings (PAINTING_SPECS), wing sculptures (OUTLINE_SPECS), and its
  * single wall panel, then hands everything else to the shared engine in
- * js/ (mycelium.js, particles.js, emanate.js, scenes.js, paintings.js,
+ * js/ (mycelium.js, particles.js, scenes.js, paintings.js,
  * outlines.js, parenting.js, wall.js). See js/right/sketch.js for the
  * 3-panel curved-wall counterpart - same engine, different config.
  *
@@ -128,7 +128,7 @@ function setup() {
 function draw() {
   background(0);
 
-  if (false && wallImg)
+  if (wallImg)
     image(
       wallImg,
       -width / 2,
@@ -167,7 +167,10 @@ function keyPressed() {
       // maps/left/map.json to persist it (see README).
       pMapper.save("left-map.json");
       break;
-    case "i":
+    case "q":
+      cycleButterflyLightMode();
+      break;
+    case "w":
       cyclePaintingLightMode();
       break;
     case "p":

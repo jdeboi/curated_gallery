@@ -4,10 +4,10 @@
  *
  * A physical wall with a curve/bend can't be corner-pinned as a single
  * flat QuadMap - each flat segment needs its own independent corner-pin.
- * But the generative scenes (mycelium, particles, emanate), and the
- * painting/outline geometry they steer around, all want to think in one
- * continuous coordinate space so content can flow across the seam
- * between panels rather than being siloed per-panel.
+ * But the generative scenes (mycelium, particles, snake), the rippling
+ * emanate outlines, and the painting/outline geometry they steer around,
+ * all want to think in one continuous coordinate space so content can flow
+ * across the seam between panels rather than being siloed per-panel.
  *
  * wallPanels is that bridge: each entry is { map, x, y } - a corner-pinned
  * QuadMap plus where its own local (0,0) sits inside the wall's shared
@@ -70,7 +70,10 @@ function initWallPanels(panels) {
 // individually reachable from the start rather than needing to dig one
 // out of a pile - it's a starting layout for calibration, not a real
 // position, so it doesn't need to be pretty.
-function spreadDefaultPositions(surfaces, { originX = 0, originY = 0, spacing = 40 } = {}) {
+function spreadDefaultPositions(
+  surfaces,
+  { originX = 0, originY = 0, spacing = 40 } = {},
+) {
   surfaces.forEach((s, i) =>
     s.set({ x: originX + i * spacing, y: originY + i * spacing }),
   );
@@ -80,6 +83,7 @@ function spreadDefaultPositions(surfaces, { originX = 0, originY = 0, spacing = 
 // screen-space calibration (corner-pinned against wallPanels[panelIndex]
 // specifically) into this wall's shared logical drawing space.
 function panelToLogical(panelIndex, screenX, screenY) {
+  if (!wallPanels || !wallPanels[panelIndex]) return null;
   const panel = wallPanels[panelIndex];
   const local = panel.map.getTransformedCursor(screenX, screenY);
   return { x: local.x + panel.x, y: local.y + panel.y };
@@ -113,6 +117,7 @@ function panelToLogical(panelIndex, screenX, screenY) {
 let _panelGroupDragLast = null;
 
 function syncPanelGroupDrag() {
+  if (!wallPanels) return;
   const dragged = wallPanels.find((panel) => panel.map.isDragging);
 
   if (!dragged) {
@@ -202,6 +207,7 @@ function syncSeamCorner(leftSurface, leftPoint, rightSurface, rightPoint) {
 }
 
 function syncPanelSeams() {
+  if (!wallPanels) return;
   for (let i = 1; i < wallPanels.length; i++) {
     const left = wallPanels[i - 1].map;
     const right = wallPanels[i].map;
@@ -219,6 +225,7 @@ function syncPanelSeams() {
 // screen-space overlay instead (drawBlackoutMasksOverlay(), called from each
 // wall's draw() after this).
 function displayWall() {
+  if (!wallPanels) return;
   syncPanelGroupDrag();
   syncPanelSeams();
 
@@ -228,7 +235,9 @@ function displayWall() {
       pg.translate(-panel.x, -panel.y);
       drawShow(pg);
       drawPaintings(pg);
-      butterflyMaps.forEach((refMap, i) => drawPulsingOutline(pg, i, refMap));
+      butterflyMaps.forEach((refMap, i) =>
+        drawButterflyLightState(pg, i, refMap),
+      );
       pg.pop();
     });
   });

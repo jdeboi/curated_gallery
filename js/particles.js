@@ -2,11 +2,11 @@
  * Floating particle system for the grass layer.
  *
  * Particles live in the wall's shared logical drawing space (WALL_BOUNDS,
- * see js/wall.js) - the same space paintings.js expresses painting
- * geometry in - so collision against painting bounds is a same-space
- * check with no extra coordinate conversion. On a multi-panel wall this
- * space spans every panel, so particles drift across the seam between
- * them rather than being confined to one.
+ * see js/wall.js) - the same space paintings.js/outlines.js express
+ * painting and wing-sculpture geometry in - so collision against their
+ * bounds is a same-space check with no extra coordinate conversion. On a
+ * multi-panel wall this space spans every panel, so particles drift across
+ * the seam between them rather than being confined to one.
  */
 
 const PARTICLE_COUNT = 80;
@@ -24,7 +24,6 @@ class Particle {
     this.vx = random(-0.3, 0.3);
     this.vy = random(-0.3, 0.3);
     this.size = random(7, 14);
-    this.alpha = random(120, 220);
     this.noiseOffset = random(1000);
     this.pulsePhase = random(TWO_PI);
     this.pulseSpeed = random(0.02, 0.05);
@@ -50,20 +49,16 @@ class Particle {
   }
 
   display(pg) {
-    // Soft outer glow plus a brighter core, both breathing in and out
-    // with the particle's own phase - reads as a pulsing firefly rather
-    // than a flat dot.
-    const pulse = (Math.sin(this.pulsePhase) + 1) / 2; // 0..1
-    const glowSize = lerp(this.size * 1.8, this.size * 3.2, pulse);
-    const glowAlpha = lerp(this.alpha * 0.15, this.alpha * 0.4, pulse);
-    const coreSize = lerp(this.size * 0.7, this.size, pulse);
-    const coreAlpha = lerp(this.alpha * 0.6, this.alpha, pulse);
+    // Single flat dot, no glow/halo. Sits at full white most of the
+    // time and briefly dips to fully transparent once per cycle - the
+    // cubic shaping keeps the dip short instead of an even sine fade.
+    const raw = (Math.sin(this.pulsePhase) + 1) / 2; // 0..1
+    const dip = Math.pow(1 - raw, 3);
+    const alpha = 255 * (1 - dip);
 
     pg.noStroke();
-    pg.fill(255, glowAlpha);
-    pg.circle(this.x, this.y, glowSize);
-    pg.fill(255, coreAlpha);
-    pg.circle(this.x, this.y, coreSize);
+    pg.fill(255, alpha);
+    pg.circle(this.x, this.y, this.size);
   }
 }
 
@@ -74,10 +69,11 @@ function initParticles() {
   }
 }
 
-// First-pass AABB bounce off each painting's bounding box - pushes the
-// particle back out through whichever edge it's closest to and reflects
-// that axis of velocity. Good enough to look intentional; upgrade to a
-// polygon-accurate reflection later with paintings.js's pointInPainting.
+// First-pass AABB bounce off each painting's (or wing sculpture's - see
+// getOutlineBounds() in js/outlines.js) bounding box - pushes the particle
+// back out through whichever edge it's closest to and reflects that axis of
+// velocity. Good enough to look intentional; upgrade to a polygon-accurate
+// reflection later with paintings.js's pointInPainting.
 function resolveCollisions(p, bounds) {
   for (const b of bounds) {
     if (p.x > b.x && p.x < b.x + b.w && p.y > b.y && p.y < b.y + b.h) {
@@ -105,7 +101,7 @@ function resolveCollisions(p, bounds) {
 }
 
 function updateParticles() {
-  const bounds = getPaintingBounds();
+  const bounds = getPaintingBounds().concat(getOutlineBounds());
   particles.forEach((p) => p.update(bounds));
 }
 

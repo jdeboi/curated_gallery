@@ -26,19 +26,31 @@
  * Each entry owns its own init/update/draw triplet and is otherwise
  * unaware of the others - the manager here only decides which one is
  * live. Entering a scene always calls its init() so switching mid-show
- * (auto-advance or manual) never leaves stale state (a half-grown
- * mycelium network, drifting emanate particles) bleeding into the next
- * scene; each scene restarts its own arc from empty every time it comes
- * up. A page that loads mid-scene (e.g. a wall computer rebooted
- * mid-show) will start that scene from empty too, rather than fast-
- * forwarding visually to where it "should" be - it'll be back in phase
- * with the other wall at the next scene boundary, same fixed-timestep
- * work as above would be needed to catch a scene up instantly.
+ * (auto-advance or manual) never leaves stale state (e.g. a half-grown
+ * mycelium network) bleeding into the next scene; each scene restarts its
+ * own arc from empty every time it comes up. A page that loads mid-scene
+ * (e.g. a wall computer rebooted mid-show) will start that scene from
+ * empty too, rather than fast-forwarding visually to where it "should" be
+ * - it'll be back in phase with the other wall at the next scene
+ * boundary, same fixed-timestep work as above would be needed to catch a
+ * scene up instantly. ("emanate" has no state of its own to reset - see
+ * below.)
  *
- * The pulsing wing outlines (js/outlines.js) and painting glow
- * (js/paintings.js) are drawn on top of every scene in sketch.js's
- * draw(), not listed here - they're the installation's constant
- * signature, not a scene of their own.
+ * A scene entry may also set `butterflyState` and/or `paintingState` -
+ * how the wing sculptures / paintings should sit while that scene is
+ * live, in the shared vocabulary from js/lightState.js ("filled",
+ * "outline", "off", or a pulse/switch descriptor between them). Neither
+ * field is required: a scene that omits one gets LIGHT_STATE_DEFAULT
+ * ("filled" - everything illuminated), which is why plain scenes below
+ * don't set them at all. This is separate from a scene's own
+ * init/update/draw - "emanate"'s rippling animation, for instance, plays
+ * on top of whatever butterflyState resolves to (default: filled),
+ * rather than being that state itself.
+ *
+ * Paintings (js/paintings.js) and wing sculptures (js/outlines.js) are
+ * drawn on top of every scene from js/wall.js's displayWall(), not listed
+ * here - each reads its own current butterflyState/paintingState off
+ * currentScene() every frame rather than being scenes themselves.
  */
 
 const SCENES = [
@@ -52,9 +64,11 @@ const SCENES = [
   {
     name: "emanate",
     duration: 40000,
-    init: initEmanate,
-    update: updateEmanate,
-    draw: drawEmanate,
+    init: () => {},
+    update: () => {},
+    draw: drawEmanateRipples, // js/outlines.js
+    // butterflyState omitted -> defaults to "filled", so the sculptures
+    // stay solid white while the ripples play on top.
   },
   {
     name: "fireflies",
@@ -62,6 +76,13 @@ const SCENES = [
     init: initParticles,
     update: updateParticles,
     draw: drawParticles,
+  },
+  {
+    name: "snake",
+    duration: 35000,
+    init: initSnake,
+    update: updateSnake,
+    draw: drawSnake,
   },
 ];
 
