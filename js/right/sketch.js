@@ -74,6 +74,8 @@ function setup() {
     textFont(myFont);
   });
 
+  loadBackgroundVideos(); // js/video.js - one <video> element per VIDEO_FILES entry
+
   pMapper = createProjectionMapper(this);
 
   initWallPanels([

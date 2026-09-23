@@ -84,6 +84,23 @@ const SCENES = [
     update: updateSnake,
     draw: drawSnake,
   },
+  {
+    name: "reactionDiffusion",
+    duration: 40000,
+    init: initReactionDiffusion,
+    update: updateReactionDiffusion,
+    draw: drawReactionDiffusion, // js/reactionDiffusion.js - shader-based
+  },
+  {
+    name: "circleWobble",
+    duration: 40000,
+    init: initCircleWobble,
+    update: updateCircleWobble,
+    draw: drawCircleWobble, // js/circleWobble.js - shader-based
+  },
+  // One entry per file in js/video.js's VIDEO_FILES - see that file for
+  // why these are generated instead of listed by hand here.
+  ...buildVideoScenes(),
 ];
 
 const SHOW_TOTAL_DURATION = SCENES.reduce((sum, s) => sum + s.duration, 0);

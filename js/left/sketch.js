@@ -77,6 +77,8 @@ function setup() {
     wallImg = loadedWallImg;
   });
 
+  loadBackgroundVideos(); // js/video.js - one <video> element per VIDEO_FILES entry
+
   // create mapper object
   pMapper = createProjectionMapper(this);
 
