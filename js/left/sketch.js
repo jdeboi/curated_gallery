@@ -31,8 +31,18 @@ const PAINTING_SPECS = [
 // One wing sculpture per butterflyMap, same convention as above.
 const OUTLINE_SPECS = [
   { name: "bird", file: "assets/left/bird.svg", width: 322.5, height: 294.49 },
-  { name: "butterfly0", file: "assets/left/butterfly0.svg", width: 328.97, height: 242.07 },
-  { name: "butterfly1", file: "assets/left/butterfly1.svg", width: 276.61, height: 272.9 },
+  {
+    name: "butterfly0",
+    file: "assets/left/butterfly0.svg",
+    width: 328.97,
+    height: 242.07,
+  },
+  {
+    name: "butterfly1",
+    file: "assets/left/butterfly1.svg",
+    width: 276.61,
+    height: 272.9,
+  },
 ];
 
 // No blackout masks needed on left wall yet - see js/right/sketch.js for
@@ -74,7 +84,11 @@ function setup() {
   // see js/paintings.js and js/outlines.js for why. paintingMaps and
   // butterflyMaps exist purely as corner-pinned geometry references.
   initWallPanels([
-    { map: pMapper.createQuadMap(870, 700, WALL_PANEL_RES, WALL_PANEL_RES), x: 0, y: 0 },
+    {
+      map: pMapper.createQuadMap(870, 700, WALL_PANEL_RES, WALL_PANEL_RES),
+      x: 0,
+      y: 0,
+    },
   ]);
 
   // p5.mapper 3.0.0+: a single res is now a target pixel spacing, not a
