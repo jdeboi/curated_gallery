@@ -118,7 +118,7 @@ function drawCalibrationOutline(pg, localPoints) {
 // cycles a manual override on top of that, for previewing a look without
 // needing to sit through a specific scene - "auto" (the default) defers
 // back to whatever the current scene declares.
-const BUTTERFLY_LIGHT_OVERRIDES = ["auto", "filled", "outline", "off"];
+const BUTTERFLY_LIGHT_OVERRIDES = ["auto", "filled", "glow", "outline", "off"];
 let butterflyLightOverride = "auto";
 
 function cycleButterflyLightMode() {
@@ -146,18 +146,22 @@ function drawButterflyLightState(pg, index, refMap) {
     return;
   }
 
-  const resolved = resolveLightState(currentButterflyState());
-  drawLightShape(pg, localPoints, resolved, { strokeWeight: 3 });
+  const stateValue = currentButterflyState();
+  const resolved = resolveLightState(stateValue);
+  if (isLitState(resolved) && isGlowMode(stateValue)) drawGlow(pg, localPoints);
+  drawLightShape(pg, localPoints, resolved, { strokeWeight: 9 });
 }
 
 const RIPPLE_STROKE_WEIGHT = 10;
-const RIPPLE_COUNT = 3;
-const RIPPLE_PERIOD_SECONDS = 5; // time for one ripple to cross the whole wall
+const RIPPLE_COUNT = 12;
+const RIPPLE_PERIOD_SECONDS = 16; // time for one ripple to cross the whole wall
+const RIPPLE_FADE_FRACTION = 0.15; // ripple fades to nothing within this fraction of the sweep, not the whole thing
 
 // The "emanate" scene's own animation (js/scenes.js, set as that scene's
-// `draw`) - thick rings expand outward from each wing sculpture's centroid
-// at constant full brightness (no fade) until they've crossed the entire
-// wall, then loop. Layered on top of drawButterflyLightState's steady state
+// `draw`) - thin rings expand outward from every wing sculpture's centroid
+// at once, fading out quickly (within RIPPLE_FADE_FRACTION of the sweep)
+// rather than staying visible the whole way across, then loop. Layered on
+// top of drawButterflyLightState's steady state
 // (drawn separately, from js/wall.js) rather than replacing it, and runs
 // regardless of what that steady state is set to - it's the scene's own
 // content, not a property of the sculpture's resting look.
@@ -190,10 +194,11 @@ function drawEmanateRipples(pg) {
     for (let r = 0; r < RIPPLE_COUNT; r++) {
       const phase = (t + r / RIPPLE_COUNT) % 1;
       const growth = phase * maxGrowth;
+      const alpha = Math.max(0, 255 * (1 - phase / RIPPLE_FADE_FRACTION));
 
       pg.push();
       pg.noFill();
-      pg.stroke(255); // full brightness for the whole sweep - no fade
+      pg.stroke(255, alpha);
       pg.strokeWeight(RIPPLE_STROKE_WEIGHT);
       pg.beginShape();
       directions.forEach((d) => {

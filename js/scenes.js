@@ -85,6 +85,20 @@ const SCENES = [
     draw: drawSnake,
   },
   {
+    name: "birds",
+    duration: 35000,
+    init: initBirds,
+    update: updateBirds,
+    draw: drawBirds,
+  },
+  {
+    name: "butterflies",
+    duration: 35000,
+    init: initButterflies,
+    update: updateButterflies,
+    draw: drawButterflies,
+  },
+  {
     name: "reactionDiffusion",
     duration: 40000,
     init: initReactionDiffusion,

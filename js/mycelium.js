@@ -5,7 +5,7 @@
  * see js/wall.js) - the same space paintings.js/outlines.js express
  * painting and wing-sculpture geometry in - bouncing back inward at the
  * wall edges, and steering away from those polygons (inflated slightly via
- * polygonCentroid, same trick drawPaintingGlow uses) so hyphae wrap around
+ * polygonCentroid, same trick drawGlow uses) so hyphae wrap around
  * frames/sculptures rather than crossing them. On a multi-panel wall this
  * space spans every
  * panel, so a branch can grow right across the seam from one physical

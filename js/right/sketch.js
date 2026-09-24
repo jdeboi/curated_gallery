@@ -56,12 +56,26 @@ const OUTLINE_SPECS = [];
 // panel (see js/masks.js), not tied to any one panel. `numPoints` sets how
 // many draggable vertices it starts with - drag them during calibration
 // (press "c") to trace the exact area to cover.
-const MASK_SPECS = [{ numPoints: 6 }, { numPoints: 4 }, { numPoints: 4 }];
+const MASK_SPECS = [
+  { numPoints: 10 },
+  { numPoints: 6 },
+  { numPoints: 6 },
+  { numPoints: 6 },
+];
+
+// Same idea as MASK_SPECS, but a smooth freeform BezierMap (curved edges,
+// anchor + control-point handles) instead of a straight-edged PolyMap -
+// useful for masking a curved/uneven boundary like the bottom of the wall.
+// `numAnchors` sets how many anchor points the closed loop starts with;
+// drag its anchors/handles during calibration (press "c") the same way you
+// would a MASK_SPECS entry. See js/masks.js for how both are composited.
+const BEZIER_MASK_SPECS = [{ numAnchors: 5 }];
 
 let pMapper;
 let paintingMaps = [];
 let butterflyMaps = [];
 let maskMaps = [];
+let bezierMaskMaps = [];
 
 let myFont;
 let wallImg;
@@ -75,6 +89,8 @@ function setup() {
   });
 
   loadBackgroundVideos(); // js/video.js - one <video> element per VIDEO_FILES entry
+  loadBirdSprite(); // js/birds.js
+  loadButterflySprite(); // js/butterflies.js
 
   pMapper = createProjectionMapper(this);
 
@@ -104,6 +120,13 @@ function setup() {
 
   maskMaps = MASK_SPECS.map((spec) => pMapper.createPolyMap(spec.numPoints));
   spreadDefaultPositions(maskMaps, { originX: -700, originY: 200, spacing: 40 });
+
+  bezierMaskMaps = BEZIER_MASK_SPECS.map((spec) =>
+    pMapper.createBezierMap(spec.numAnchors),
+  );
+  // Default position near the bottom-center of the wall (WALL_WIDTH/HEIGHT
+  // above), ready to drag its anchors/handles into place during calibration.
+  spreadDefaultPositions(bezierMaskMaps, { originX: -42, originY: 300, spacing: 40 });
 
   initShow();
 

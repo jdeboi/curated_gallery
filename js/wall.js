@@ -324,6 +324,7 @@ function drawSurfaceLabels() {
     ...paintingMaps,
     ...butterflyMaps,
     ...maskMaps,
+    ...bezierMaskMaps,
   ];
 
   push();

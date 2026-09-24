@@ -100,20 +100,21 @@ states" below.
 ## Light states
 
 Wing sculptures and paintings both render through one shared vocabulary
-(`js/lightState.js`): `"filled"` (solid), `"outline"` (stroke only),
-`"off"`, or a `{ mode: "pulse" | "switch", states: [...], period }`
-descriptor that crossfades (`pulse`) or hard-cuts (`switch`) between two
-or more of those over `period` seconds. Each `SCENES` entry in
-`js/scenes.js` can set its own `butterflyState` and/or `paintingState`;
-leaving either unset defaults to `"filled"` ("all illuminated"). This is
-independent of a scene's own `init`/`update`/`draw` - e.g. "emanate"'s
-ripple animation plays on top of whatever `butterflyState` resolves to,
-rather than being that state itself.
+(`js/lightState.js`): `"filled"` (solid), `"glow"` (solid, plus a soft
+bleeding-edge halo), `"outline"` (stroke only), `"off"`, or a
+`{ mode: "pulse" | "switch", states: [...], period }` descriptor that
+crossfades (`pulse`) or hard-cuts (`switch`) between two or more of those
+over `period` seconds. Each `SCENES` entry in `js/scenes.js` can set its
+own `butterflyState` and/or `paintingState`; leaving either unset defaults
+to `"filled"` ("all illuminated"). This is independent of a scene's own
+`init`/`update`/`draw` - e.g. "emanate"'s ripple animation plays on top of
+whatever `butterflyState` resolves to, rather than being that state
+itself.
 
-`q` / `w` (see keybindings below) cycle a manual `auto → filled → outline
-→ off` override for butterflies/paintings respectively, for previewing a
-look without sitting through a specific scene - `auto` (the default)
-defers back to whatever the live scene declares.
+`q` / `w` (see keybindings below) cycle a manual `auto → filled → glow →
+outline → off` override for butterflies/paintings respectively, for
+previewing a look without sitting through a specific scene - `auto` (the
+default) defers back to whatever the live scene declares.
 
 ## Calibration workflow
 
@@ -137,8 +138,8 @@ Keybindings (see `keyPressed()` in each wall's `sketch.js`):
 | `s` | Save calibration (downloads a JSON file - see step 5 above) |
 | `l` | Reload calibration from `maps/<wall>/map.json` |
 | `f` | Toggle fullscreen |
-| `q` | Cycle butterfly light override (auto / filled / outline / off) |
-| `w` | Cycle painting light override (auto / filled / outline / off) |
+| `q` | Cycle butterfly light override (auto / filled / glow / outline / off) |
+| `w` | Cycle painting light override (auto / filled / glow / outline / off) |
 
 ## Parenting: keeping paintings aligned when a panel moves
 

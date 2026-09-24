@@ -50,6 +50,10 @@ const OUTLINE_SPECS = [
 // screen-space overlay on top of every panel - see js/masks.js).
 const MASK_SPECS = [];
 
+// Same idea as MASK_SPECS, but a smooth freeform BezierMap instead of a
+// straight-edged PolyMap - see js/right/sketch.js's BEZIER_MASK_SPECS.
+const BEZIER_MASK_SPECS = [];
+
 // Literal divisions-per-axis for the wall panel itself (see
 // js/right/sketch.js's WALL_PANEL_RES for why this is separate from
 // PAINTING_SPECS' res - this panel displays real textured content, unlike
@@ -60,6 +64,7 @@ let pMapper;
 let paintingMaps = [];
 let butterflyMaps = [];
 let maskMaps = [];
+let bezierMaskMaps = [];
 
 let myFont;
 let wallImg;
@@ -78,6 +83,8 @@ function setup() {
   });
 
   loadBackgroundVideos(); // js/video.js - one <video> element per VIDEO_FILES entry
+  loadBirdSprite(); // js/birds.js
+  loadButterflySprite(); // js/butterflies.js
 
   // create mapper object
   pMapper = createProjectionMapper(this);

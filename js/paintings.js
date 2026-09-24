@@ -108,22 +108,6 @@ function drawPolygon(pg, poly, { fillColor, strokeColor, weight } = {}) {
   pg.pop();
 }
 
-// Soft halo that bleeds onto the grass around a painting - layered,
-// growing, fading copies of the same polygon offset from its centroid.
-function drawPaintingGlow(pg, poly) {
-  const centroid = polygonCentroid(poly);
-  const numRings = 4;
-  for (let r = numRings; r >= 1; r--) {
-    const scale = 1 + r * 0.12;
-    const alpha = 40 * (1 - r / (numRings + 1));
-    const ringPoly = poly.map((p) => ({
-      x: centroid.x + (p.x - centroid.x) * scale,
-      y: centroid.y + (p.y - centroid.y) * scale,
-    }));
-    drawPolygon(pg, ringPoly, { fillColor: pg.color(255, alpha) });
-  }
-}
-
 // A painting's lit state normally comes from the live scene's own
 // `paintingState` (js/scenes.js; unset means LIGHT_STATE_DEFAULT - see
 // js/lightState.js), same mechanism as the wing sculptures in
@@ -132,8 +116,37 @@ function drawPaintingGlow(pg, poly) {
 // one, for previewing a look (e.g. checking corner-pin alignment in
 // "outline") without needing to sit through a specific scene - "auto"
 // (the default) defers back to whatever the current scene declares.
-const PAINTING_LIGHT_OVERRIDES = ["auto", "filled", "outline", "off"];
+//
+// "sequence" and "random" are spotlight modes: unlike the other states
+// (which apply the same resolved look to every painting), these light up a
+// moving *subset* of paintings - the rest "off" - stepping every
+// PAINTING_SPOTLIGHT_PERIOD seconds. Both are a sliding window over some
+// order of the paintings, differing only in what order they slide over and
+// how big the window is:
+//   - "sequence" slides a PAINTING_SEQUENCE_FRACTION-sized window over the
+//     paintingMaps in their plain index order, so the lit band visibly
+//     travels down the wall.
+//   - "random" slides a (larger) PAINTING_RANDOM_FRACTION-sized window over
+//     a freshly shuffled order each time it's cycled all the way through,
+//     so which paintings are lit looks random step to step while every
+//     painting still gets an even share of lit time overall (a plain
+//     independent-coinflip-per-step version could leave some painting dark
+//     for a long stretch by chance, or light the same one twice running).
+// Both are handled specially in drawPaintings() below since they need the
+// painting count/order, not just a single resolved state.
+const PAINTING_LIGHT_OVERRIDES = [
+  "auto",
+  "filled",
+  "glow",
+  "outline",
+  "off",
+  "sequence",
+  "random",
+];
 let paintingLightOverride = "auto";
+const PAINTING_SPOTLIGHT_PERIOD = 1.5; // seconds between steps
+const PAINTING_SEQUENCE_FRACTION = 1 / 3; // fraction of paintings lit at once
+const PAINTING_RANDOM_FRACTION = 1 / 2; // fraction of paintings lit at once
 
 function cyclePaintingLightMode() {
   const idx = PAINTING_LIGHT_OVERRIDES.indexOf(paintingLightOverride);
@@ -147,17 +160,73 @@ function currentPaintingState() {
     : paintingLightOverride;
 }
 
-function drawPaintings(pg) {
-  const resolved = resolveLightState(currentPaintingState());
-  // "off" is an opaque *black* fill (see js/lightState.js), not the
-  // absence of one - only count it as lit, and worth a glow halo, when
-  // there's actually light-colored fill/stroke showing.
-  const lit =
-    (resolved.fillAlpha > 0 && resolved.fillColor > 0) ||
-    resolved.strokeAlpha > 0;
+function isSpotlightMode(state) {
+  return state === "sequence" || state === "random";
+}
 
-  getPaintingPolygons().forEach((poly) => {
-    if (lit) drawPaintingGlow(pg, poly);
-    drawLightShape(pg, poly, resolved, { strokeWeight: 3 });
+function shuffledIndices(count) {
+  const order = Array.from({ length: count }, (_, i) => i);
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  return order;
+}
+
+// Reshuffled once per full pass through the paintings (see comment above),
+// keyed on `cycle` so repeated calls within the same pass reuse it.
+let _spotlightShuffle = { order: [], cycle: -1, count: -1 };
+
+// Returns the Set of painting indices lit this frame: a `windowSize`-wide
+// band that slides one step per PAINTING_SPOTLIGHT_PERIOD through either
+// plain (0,1,2,...) or shuffled order, wrapping around.
+function spotlightLitIndices(mode, count) {
+  if (count <= 0) return new Set();
+  const slot = Math.floor(millis() / (PAINTING_SPOTLIGHT_PERIOD * 1000));
+
+  let order;
+  let windowSize;
+  let step;
+  if (mode === "sequence") {
+    order = Array.from({ length: count }, (_, i) => i);
+    windowSize = Math.max(1, Math.round(count * PAINTING_SEQUENCE_FRACTION));
+    step = slot % count;
+  } else {
+    windowSize = Math.max(1, Math.round(count * PAINTING_RANDOM_FRACTION));
+    const cycle = Math.floor(slot / count);
+    if (cycle !== _spotlightShuffle.cycle || count !== _spotlightShuffle.count) {
+      _spotlightShuffle = { order: shuffledIndices(count), cycle, count };
+    }
+    order = _spotlightShuffle.order;
+    step = slot % count;
+  }
+
+  const lit = new Set();
+  for (let i = 0; i < windowSize; i++) lit.add(order[(step + i) % count]);
+  return lit;
+}
+
+function drawPaintings(pg) {
+  const stateValue = currentPaintingState();
+  const polygons = getPaintingPolygons();
+
+  if (isSpotlightMode(stateValue)) {
+    const litIndices = spotlightLitIndices(stateValue, polygons.length);
+    const onState = resolveLightState("glow");
+    const offState = resolveLightState("outline");
+    polygons.forEach((poly, i) => {
+      const on = litIndices.has(i);
+      if (on) drawGlow(pg, poly);
+      drawLightShape(pg, poly, on ? onState : offState, { strokeWeight: 9 });
+    });
+    return;
+  }
+
+  const resolved = resolveLightState(stateValue);
+  const lit = isLitState(resolved);
+
+  polygons.forEach((poly) => {
+    if (lit && isGlowMode(stateValue)) drawGlow(pg, poly);
+    drawLightShape(pg, poly, resolved, { strokeWeight: 9 });
   });
 }
