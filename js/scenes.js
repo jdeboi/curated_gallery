@@ -130,6 +130,20 @@ const SCENES = [
     draw: drawButterflies,
   },
   {
+    name: "nightBirds",
+    duration: 35000,
+    init: initBirds, // js/birds.js - same boid flock as "birds"
+    update: updateBirds,
+    draw: (pg) => pg.background(0),
+    // drawBirds runs from `overlay` (drawn after drawPaintings(), see
+    // js/wall.js's displayWall()) instead of `draw` here, so the flock
+    // stays visible sweeping across the lit paintings themselves rather
+    // than disappearing behind their opaque fill - same reason
+    // "spinner"/"searchlight" below use overlay for their own content.
+    overlay: drawBirds,
+    paintingState: "filled",
+  },
+  {
     name: "reactionDiffusion",
     duration: 40000,
     init: initReactionDiffusion,
@@ -185,14 +199,6 @@ const SCENES = [
     update: () => {},
     draw: (pg) => pg.background(0),
     paintingState: "pulse",
-  },
-  {
-    name: "burn",
-    duration: 30000,
-    init: () => {},
-    update: () => {},
-    draw: (pg) => pg.background(0),
-    paintingState: "burn",
   },
   {
     name: "spinner",

@@ -110,7 +110,6 @@ function setup() {
   paintingMaps = PAINTING_SPECS.map((s) =>
     pMapper.createQuadMap(s.w, s.h, s.res, s.res),
   );
-  loadBurnVideos(PAINTING_SPECS.length); // js/video.js - one <video> element per painting, for the "burn" painting mode
 
   // Each outline gets a QuadMap sized to its own SVG viewBox, used purely
   // as a corner-pin frame - see js/outlines.js for why the traced shape

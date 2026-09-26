@@ -34,11 +34,11 @@ const VIDEO_FILES = [
   { path: "assets/video/convergetriangles.mp4" },
   { path: "assets/video/noisewaves.mp4" },
   // { path: "assets/video/ovalspin.mp4" },
-  { path: "assets/video/pixels.mp4", tile: 2 },
+  // { path: "assets/video/pixels.mp4", tile: 2 },
   // { path: "assets/video/rectspin.mp4" },
   { path: "assets/video/sparklediamond.mp4" },
-  { path: "assets/video/waves.mp4" },
-  { path: "assets/video/wavyvertlines.mp4" },
+  // { path: "assets/video/waves.mp4" },
+  // { path: "assets/video/wavyvertlines.mp4" },
 ];
 
 const VIDEO_SCENE_DURATION = 25000; // ms per video scene - same ballpark as the other scenes
@@ -55,29 +55,6 @@ function loadBackgroundVideos() {
     const v = createVideo(path);
     v.hide(); // createVideo() attaches a real <video> DOM element - we draw it ourselves via pg.image(), so keep the actual element off-screen
     v.volume(0); // muted: autoplay/looping without a user gesture requires it, and the wall has no audio output anyway
-    v.pause();
-    return v;
-  });
-}
-
-// assets/video/burn.mov, remuxed to .mp4 (still H.264, no re-encode - it had
-// no audio track to worry about) for the same browser-container reason as
-// convergetriangles above; the original .mov is left in place untouched.
-const BURN_VIDEO_PATH = "assets/video/burn.mp4";
-
-// One <video> element per painting (index-aligned with paintingMaps), not
-// one shared element - the "burn" painting mode (js/paintings.js) stages
-// each painting through its own white/burn/black cycle on its own jittered
-// schedule, so two paintings can easily be mid-video at once and each needs
-// its own independent playback position. Created once count is known (each
-// wall's sketch.js calls this right after building paintingMaps).
-let burnVideoElements = [];
-
-function loadBurnVideos(count) {
-  burnVideoElements = Array.from({ length: count }, () => {
-    const v = createVideo(BURN_VIDEO_PATH);
-    v.hide();
-    v.volume(0);
     v.pause();
     return v;
   });

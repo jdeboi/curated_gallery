@@ -46,10 +46,8 @@ function getPaintingPolygons() {
 }
 
 // Axis-aligned bounding box of a single polygon - shared by getPaintingBounds()
-// below (every painting) and drawBurnVideoInPolygon() (js/paintings.js's
-// "burn" mode, one polygon at a time) as the cover-fit box for content that
-// doesn't warp to the painting's actual (possibly non-rectangular)
-// corner-pinned quad.
+// below (every painting) as the cover-fit box for content that doesn't warp
+// to the painting's actual (possibly non-rectangular) corner-pinned quad.
 function polygonBounds(poly) {
   const xs = poly.map((p) => p.x);
   const ys = poly.map((p) => p.y);
@@ -144,15 +142,10 @@ function drawPolygon(pg, poly, { fillColor, strokeColor, weight } = {}) {
 // All four are handled specially in drawPaintings() below since they need
 // the painting count/order, not just a single resolved state.
 //
-// "curtain", "wipe", "pulse", and "burn" are per-painting animated modes -
-// each paints its own polygon per painting (curtain/pulse/burn offset so
-// paintings don't move in lockstep; wipe travels left-to-right across all of
-// them at once) rather than resolving one state for every painting alike.
-// "burn" is the odd one out among these: rather than only ever drawing a
-// solid/outlined version of the painting's own polygon, it also plays
-// assets/video/burn.mp4 (js/video.js) into it partway through each
-// painting's cycle - see drawBurnPaintings() below for the white -> video ->
-// black sequence.
+// "curtain", "wipe", and "pulse" are per-painting animated modes - each
+// paints its own polygon per painting (curtain/pulse offset so paintings
+// don't move in lockstep; wipe travels left-to-right across all of them at
+// once) rather than resolving one state for every painting alike.
 const PAINTING_LIGHT_OVERRIDES = [
   "auto",
   "filled",
@@ -166,7 +159,6 @@ const PAINTING_LIGHT_OVERRIDES = [
   "curtain",
   "wipe",
   "pulse",
-  "burn",
 ];
 let paintingLightOverride = "auto";
 const PAINTING_SPOTLIGHT_PERIOD = 1.5; // seconds between steps
@@ -472,87 +464,6 @@ function drawPulsePaintings(pg, polygons) {
   });
 }
 
-// "burn": each painting independently cycles white -> burn video -> black
-// -> (dark hold) -> repeat, on its own jittered schedule (paintingHash, same
-// technique as "curtain" above) so paintings ignite at staggered, "random"
-// looking intervals rather than all lighting up together. The white flash
-// and the video itself play at fixed real-world durations (BURN_VIDEO_PATH
-// - js/video.js - actually decodes in real time, so it can't be sped up/
-// slowed down the way curtain's whole cycle is jittered); only the dark
-// hold between bursts is randomized per painting, which is what varies each
-// painting's overall period.
-const BURN_WHITE_DURATION = 1; // seconds the painting flashes solid white before the video starts
-const BURN_BLACK_HOLD_MIN = 5; // seconds held dark after the video ends, at minimum
-const BURN_BLACK_HOLD_RANGE = 10; // extra seconds of dark hold, randomized per painting on top of the min
-// Matches assets/video/burn.mp4's actual duration (see js/video.js) - used
-// only as a fallback before that video element's own metadata has loaded,
-// since burnVideoDuration() prefers the real duration once available.
-const BURN_VIDEO_FALLBACK_DURATION = 3.77;
-
-function burnVideoDuration(v) {
-  const d = v && v.duration ? v.duration() : 0;
-  return Number.isFinite(d) && d > 0 ? d : BURN_VIDEO_FALLBACK_DURATION;
-}
-
-// Draws video `v`'s current frame cover-fit into `poly`'s bounding box, then
-// clips it to `poly`'s actual (possibly non-rectangular, corner-pinned)
-// shape - pg.clip()'s mask callback runs beginShape/vertex/endShape same as
-// drawPolygon() above, and wrapping the whole thing in push()/pop() scopes
-// the clip to just this draw (p5's clip persists on the canvas context
-// until the next pop()/restore(), same as any other drawing state).
-function drawBurnVideoInPolygon(pg, v, poly) {
-  if (!v || v.width === 0) return; // metadata/first frame not loaded yet - same guard as drawVideoScene() (js/video.js)
-  const bounds = polygonBounds(poly);
-  pg.push();
-  pg.clip(() => {
-    pg.beginShape();
-    poly.forEach((p) => pg.vertex(p.x, p.y));
-    pg.endShape(CLOSE);
-  });
-  drawVideoCover(pg, v, bounds.x, bounds.y, bounds.w, bounds.h); // js/video.js
-  pg.pop();
-}
-
-// Whether painting `i` was in its "burn" (video-playing) phase last frame -
-// needed only so entering that phase can seek the video to 0 and start it
-// playing exactly once, rather than every frame; curtain/wipe/pulse don't
-// need anything like this since they only ever draw shapes, never drive a
-// stateful <video> element.
-let _burnWasPlaying = [];
-
-function drawBurnPaintings(pg, polygons) {
-  const whiteState = resolveLightState("filled");
-  const offState = resolveLightState("off");
-  polygons.forEach((poly, i) => {
-    const v = burnVideoElements[i]; // js/video.js
-    const videoDuration = burnVideoDuration(v);
-    const blackHold =
-      BURN_BLACK_HOLD_MIN + paintingHash(i, 5) * BURN_BLACK_HOLD_RANGE;
-    const period = BURN_WHITE_DURATION + videoDuration + blackHold;
-    const phaseOffset = paintingHash(i, 6) * period;
-    const t = (millis() / 1000 + phaseOffset) % period;
-
-    const burnStart = BURN_WHITE_DURATION;
-    const burnEnd = burnStart + videoDuration;
-    const burning = t >= burnStart && t < burnEnd;
-
-    if (burning) {
-      if (!_burnWasPlaying[i] && v) {
-        v.time(0);
-        v.play();
-      }
-      drawBurnVideoInPolygon(pg, v, poly);
-    } else {
-      if (_burnWasPlaying[i] && v) v.pause();
-      const white = t < burnStart;
-      drawLightShape(pg, poly, white ? whiteState : offState, {
-        strokeWeight: 9,
-      });
-    }
-    _burnWasPlaying[i] = burning;
-  });
-}
-
 function drawPaintings(pg) {
   const stateValue = currentPaintingState();
   const polygons = getPaintingPolygons();
@@ -572,7 +483,6 @@ function drawPaintings(pg) {
   if (stateValue === "curtain") return drawCurtainPaintings(pg, polygons);
   if (stateValue === "wipe") return drawWipePaintings(pg, polygons);
   if (stateValue === "pulse") return drawPulsePaintings(pg, polygons);
-  if (stateValue === "burn") return drawBurnPaintings(pg, polygons);
 
   const resolved = resolveLightState(stateValue);
   const lit = isLitState(resolved);

@@ -165,7 +165,6 @@ function setup() {
   paintingMaps = PAINTING_SPECS.map((s) =>
     pMapper.createQuadMap(s.w, s.h, s.res, s.res),
   );
-  loadBurnVideos(PAINTING_SPECS.length); // js/video.js - one <video> element per painting, for the "burn" painting mode
   // Spread apart at their default position so they aren't all stacked on
   // top of each other (and of the wall panel underneath) before you've
   // dragged any of them - see spreadDefaultPositions() in js/wall.js.
