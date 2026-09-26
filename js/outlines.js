@@ -50,7 +50,9 @@ function loadOutlineSVGs() {
         .then((points) => {
           outlinePaths[i] = points;
         })
-        .catch((err) => console.error("Failed to load outline SVG:", spec.file, err)),
+        .catch((err) =>
+          console.error("Failed to load outline SVG:", spec.file, err),
+        ),
     ),
   );
 }
@@ -153,64 +155,158 @@ function drawButterflyLightState(pg, index, refMap) {
 }
 
 const RIPPLE_STROKE_WEIGHT = 10;
-const RIPPLE_COUNT = 12;
+const RIPPLE_COUNT = 24; // more rings than fit visibly, so they read as closely, evenly spaced
 const RIPPLE_PERIOD_SECONDS = 16; // time for one ripple to cross the whole wall
-const RIPPLE_FADE_FRACTION = 0.15; // ripple fades to nothing within this fraction of the sweep, not the whole thing
+const RIPPLE_FADE_IN_SECONDS = 0.16; // time for a ring to reach full alpha, avoiding a hard pop-in
+const RIPPLE_FADE_OUT_SECONDS = 2; // time after full alpha for a ring to fade to nothing
+
+// Shared by drawEmanateRipples (wing sculptures) and
+// drawPaintingEmanateRipples (js/paintings.js) below - thin white rings
+// expand outward from `poly`'s own centroid, fading out gradually as they
+// grow (rather than staying opaque and popping out abruptly at the edge),
+// then loop. Takes a plain polygon already in the wall's shared logical
+// drawing space, so it doesn't care whether that polygon came from a traced
+// SVG silhouette or a painting's plain 4-corner quad.
+function drawEmanateRipplesOnPolygon(pg, poly) {
+  const centroid = polygonCentroid(poly);
+
+  // Each point rides straight outward along its own direction from the
+  // centroid, so the shape is preserved as it grows rather than being
+  // replaced by a circle. Growth is in absolute wall pixels (not a multiple
+  // of the shape's own size) and driven by wall-clock time (not
+  // frameCount), so ripple speed stays the same regardless of a shape's
+  // size or the current frame rate. maxGrowth is the wall's full diagonal,
+  // so by the end of one period the ripple has swept clear across every
+  // panel, not just faded out a short distance from the shape.
+  const directions = poly.map((p) => {
+    const dx = p.x - centroid.x;
+    const dy = p.y - centroid.y;
+    const dist = Math.hypot(dx, dy) || 1;
+    return { ux: dx / dist, uy: dy / dist, dist };
+  });
+  const maxGrowth = Math.hypot(WALL_BOUNDS.w, WALL_BOUNDS.h);
+  const t = millis() / (RIPPLE_PERIOD_SECONDS * 1000);
+
+  for (let r = 0; r < RIPPLE_COUNT; r++) {
+    const phase = (t + r / RIPPLE_COUNT) % 1;
+    const growth = phase * maxGrowth;
+    // Alpha timing is absolute (seconds since the ring emerged from the
+    // centroid), not tied to the ripple's full period, so a quick pop-in
+    // and fade-out read the same regardless of RIPPLE_PERIOD_SECONDS.
+    const elapsedSeconds = phase * RIPPLE_PERIOD_SECONDS;
+    let alpha;
+    if (elapsedSeconds < RIPPLE_FADE_IN_SECONDS) {
+      alpha = 255 * (elapsedSeconds / RIPPLE_FADE_IN_SECONDS);
+    } else {
+      const fadeOutElapsed = elapsedSeconds - RIPPLE_FADE_IN_SECONDS;
+      alpha = 255 * (1 - fadeOutElapsed / RIPPLE_FADE_OUT_SECONDS);
+    }
+    if (alpha <= 0) continue;
+
+    pg.push();
+    pg.noFill();
+    pg.stroke(255, alpha);
+    pg.strokeWeight(RIPPLE_STROKE_WEIGHT);
+    pg.beginShape();
+    directions.forEach((d) => {
+      pg.vertex(
+        centroid.x + d.ux * (d.dist + growth),
+        centroid.y + d.uy * (d.dist + growth),
+      );
+    });
+    pg.endShape(CLOSE);
+    pg.pop();
+  }
+}
 
 // The "emanate" scene's own animation (js/scenes.js, set as that scene's
-// `draw`) - thin rings expand outward from every wing sculpture's centroid
-// at once, fading out quickly (within RIPPLE_FADE_FRACTION of the sweep)
-// rather than staying visible the whole way across, then loop. Layered on
-// top of drawButterflyLightState's steady state
-// (drawn separately, from js/wall.js) rather than replacing it, and runs
-// regardless of what that steady state is set to - it's the scene's own
-// content, not a property of the sculpture's resting look.
+// `draw`) - rippling rings around every wing sculpture at once. Layered on
+// top of drawButterflyLightState's steady state (drawn separately, from
+// js/wall.js) rather than replacing it, and runs regardless of what that
+// steady state is set to - it's the scene's own content, not a property of
+// the sculpture's resting look.
 function drawEmanateRipples(pg) {
   butterflyMaps.forEach((refMap, index) => {
     if (isCalibratingMapper()) return;
     const localPoints = outlineLocalPoints(index, refMap);
     if (!localPoints) return;
-
-    const centroid = polygonCentroid(localPoints);
-
-    // Each point rides straight outward along its own direction from the
-    // centroid, so the silhouette's shape is preserved as it grows rather
-    // than being replaced by a circle. Growth is in absolute wall pixels
-    // (not a multiple of the shape's own size) and driven by wall-clock
-    // time (not frameCount), so ripple speed stays the same regardless of
-    // a sculpture's size or the current frame rate. maxGrowth is the
-    // wall's full diagonal, so by the end of one period the ripple has
-    // swept clear across every panel, not just faded out a short distance
-    // from the wing.
-    const directions = localPoints.map((p) => {
-      const dx = p.x - centroid.x;
-      const dy = p.y - centroid.y;
-      const dist = Math.hypot(dx, dy) || 1;
-      return { ux: dx / dist, uy: dy / dist, dist };
-    });
-    const maxGrowth = Math.hypot(WALL_BOUNDS.w, WALL_BOUNDS.h);
-    const t = millis() / (RIPPLE_PERIOD_SECONDS * 1000);
-
-    for (let r = 0; r < RIPPLE_COUNT; r++) {
-      const phase = (t + r / RIPPLE_COUNT) % 1;
-      const growth = phase * maxGrowth;
-      const alpha = Math.max(0, 255 * (1 - phase / RIPPLE_FADE_FRACTION));
-
-      pg.push();
-      pg.noFill();
-      pg.stroke(255, alpha);
-      pg.strokeWeight(RIPPLE_STROKE_WEIGHT);
-      pg.beginShape();
-      directions.forEach((d) => {
-        pg.vertex(
-          centroid.x + d.ux * (d.dist + growth),
-          centroid.y + d.uy * (d.dist + growth),
-        );
-      });
-      pg.endShape(CLOSE);
-      pg.pop();
-    }
+    drawEmanateRipplesOnPolygon(pg, localPoints);
   });
+}
+
+// Walks poly's perimeter and returns the point `t` of the way around it (t
+// wraps, so -0.1 and 0.9 land at the same spot) - lets a cycling effect
+// glide continuously along any polygon's edges regardless of how many
+// vertices it has (a painting's plain 4-corner quad, or a traced 24-point
+// wing silhouette) rather than jumping vertex to vertex.
+function pointAtPerimeterFraction(poly, t) {
+  const n = poly.length;
+  const edgeLengths = poly.map((p, i) => {
+    const q = poly[(i + 1) % n];
+    return Math.hypot(q.x - p.x, q.y - p.y);
+  });
+  const perimeter = edgeLengths.reduce((a, b) => a + b, 0) || 1;
+  let dist = (((t % 1) + 1) % 1) * perimeter;
+
+  for (let i = 0; i < n; i++) {
+    if (dist <= edgeLengths[i]) {
+      const p = poly[i];
+      const q = poly[(i + 1) % n];
+      const frac = edgeLengths[i] === 0 ? 0 : dist / edgeLengths[i];
+      return { x: lerpValue(p.x, q.x, frac), y: lerpValue(p.y, q.y, frac) };
+    }
+    dist -= edgeLengths[i];
+  }
+  return poly[0];
+}
+
+// The "spinner" scene's own animation (js/scenes.js, set as that scene's
+// `overlay` - see js/wall.js's drawShowOverlay() for why this needs to be an
+// overlay rather than a plain `draw`): SPINNER_ARM_COUNT evenly-spaced
+// comet heads cycle around each painting's and wing sculpture's perimeter,
+// each trailing a short fading tail, like a loading spinner traced around
+// every lit surface on the wall. Drawn over both paintings (js/paintings.js)
+// and wing sculptures - the one effect in this file that reaches outside
+// its own outlines - so it needs to run after paintings.js/outlines.js are
+// both loaded, but since these are just function declarations that's only
+// ever a requirement at *call* time (draw()), which is already true of
+// every scene here.
+const SPINNER_PERIOD = 3; // seconds for one full lap around a surface
+const SPINNER_ARM_COUNT = 3; // evenly-spaced cycling comets per surface
+const SPINNER_TAIL_LENGTH = 0.12; // fraction of the loop each tail covers
+const SPINNER_TAIL_SAMPLES = 14; // points sampled along each tail's fade
+const SPINNER_DOT_SIZE = 10;
+// How far outward (scaled from the surface's own centroid, same technique as
+// js/lightState.js's drawGlow) the traced loop sits from the actual polygon -
+// without it the comets trace directly along the painting/wing sculpture's
+// own edge, reading as glued to the frame rather than circling it.
+const SPINNER_OFFSET_SCALE = 1.1;
+
+function drawSpinnerOnPolygon(pg, poly) {
+  const centroid = polygonCentroid(poly);
+  const ring = poly.map((p) => ({
+    x: centroid.x + (p.x - centroid.x) * SPINNER_OFFSET_SCALE,
+    y: centroid.y + (p.y - centroid.y) * SPINNER_OFFSET_SCALE,
+  }));
+  const t = millis() / (SPINNER_PERIOD * 1000);
+  pg.push();
+  pg.noStroke();
+  for (let a = 0; a < SPINNER_ARM_COUNT; a++) {
+    const headT = t + a / SPINNER_ARM_COUNT;
+    for (let s = 0; s < SPINNER_TAIL_SAMPLES; s++) {
+      const back = (s / SPINNER_TAIL_SAMPLES) * SPINNER_TAIL_LENGTH;
+      const pt = pointAtPerimeterFraction(ring, headT - back);
+      const alpha = 255 * (1 - s / SPINNER_TAIL_SAMPLES);
+      pg.fill(255, alpha);
+      pg.ellipse(pt.x, pt.y, SPINNER_DOT_SIZE, SPINNER_DOT_SIZE);
+    }
+  }
+  pg.pop();
+}
+
+function drawSpinnerOutlines(pg) {
+  getPaintingPolygons().forEach((poly) => drawSpinnerOnPolygon(pg, poly));
+  getOutlinePolygons().forEach((poly) => drawSpinnerOnPolygon(pg, poly));
 }
 
 // Same cache-per-frame pattern as getPaintingPolygons() (js/paintings.js),

@@ -60,13 +60,7 @@ function syncParentingLockFromLoadedState() {
     surfaces.every(({ surface, panel }) => surface.getParent() === wallPanels[panel].map);
 }
 
-function displayParentingStatus() {
-  if (!myFont) return;
-
-  fill(255);
-  noStroke();
-  const label = parentingLocked
-    ? "parenting: LOCKED (p to unlock)"
-    : "parenting: unlocked (p to lock)";
-  text(label, -width / 2 + 15, -height / 2 + 75);
+// "parenting: locked" - for the HUD (js/hud.js).
+function parentingStatusLine() {
+  return `parenting: ${parentingLocked ? "locked" : "unlocked"}`;
 }

@@ -52,10 +52,32 @@ function lightStateKeyframe(mode) {
   );
 }
 
+// Short human-readable label for a state descriptor - a plain mode string
+// as-is, or "mode(a/b)" for a pulse/switch descriptor. Used by the on-screen
+// HUD (js/hud.js) to show what an "auto" override is actually resolving to.
+function describeLightState(state) {
+  if (!state) return LIGHT_STATE_DEFAULT;
+  if (typeof state === "string") return state;
+  return `${state.mode}(${state.states.join("/")})`;
+}
+
 // Named to avoid colliding with p5's own global lerp() (redeclaring that
 // throws "Cannot redefine property: lerp" in global mode).
 function lerpValue(a, b, t) {
   return a + (b - a) * t;
+}
+
+// Crossfades between two resolved keyframes by `frac` (0 = ka, 1 = kb) -
+// shared by resolveLightState's "pulse" mode (which drives frac from a sine
+// wave) and any caller that already has its own frac to drive a fade from,
+// e.g. js/paintings.js's "wipe" mode fading each painting in/out as the
+// sweep passes over it.
+function crossfadeKeyframes(ka, kb, frac) {
+  return {
+    fillColor: lerpValue(ka.fillColor, kb.fillColor, frac),
+    fillAlpha: lerpValue(ka.fillAlpha, kb.fillAlpha, frac),
+    strokeAlpha: lerpValue(ka.strokeAlpha, kb.strokeAlpha, frac),
+  };
 }
 
 // Resolves a state descriptor (see file header) to a concrete
@@ -64,8 +86,12 @@ function resolveLightState(state) {
   if (!state) state = LIGHT_STATE_DEFAULT;
   if (typeof state === "string") return lightStateKeyframe(state);
 
-  const { mode, states, period } = state;
-  const t = millis() / (Math.max(period, 0.01) * 1000);
+  // phaseOffset (in units of `period`s, i.e. 1.0 = one full cycle) lets
+  // callers stagger several surfaces through the same pulse/switch
+  // descriptor instead of them all landing on the same keyframe in lockstep
+  // - see js/paintings.js's "pulse" painting mode for why.
+  const { mode, states, period, phaseOffset = 0 } = state;
+  const t = millis() / (Math.max(period, 0.01) * 1000) + phaseOffset;
 
   if (mode === "switch") {
     const index = Math.floor(t) % states.length;
@@ -76,11 +102,7 @@ function resolveLightState(state) {
   const ka = lightStateKeyframe(states[0]);
   const kb = lightStateKeyframe(states[1]);
   const wave = 0.5 + 0.5 * Math.sin(t * TWO_PI);
-  return {
-    fillColor: lerpValue(ka.fillColor, kb.fillColor, wave),
-    fillAlpha: lerpValue(ka.fillAlpha, kb.fillAlpha, wave),
-    strokeAlpha: lerpValue(ka.strokeAlpha, kb.strokeAlpha, wave),
-  };
+  return crossfadeKeyframes(ka, kb, wave);
 }
 
 // "off" is an opaque *black* fill, not the absence of one - only count a

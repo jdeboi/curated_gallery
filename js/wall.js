@@ -238,6 +238,11 @@ function displayWall() {
       butterflyMaps.forEach((refMap, i) =>
         drawButterflyLightState(pg, i, refMap),
       );
+      // Scene content that needs to sit on top of the paintings/outlines'
+      // own opaque fill (e.g. "spinner"'s cycling rings, which trace right
+      // along a painting's edge) instead of underneath it - see
+      // js/scenes.js's drawShowOverlay() and a scene's optional `overlay`.
+      drawShowOverlay(pg);
       pg.pop();
     });
   });

@@ -39,13 +39,24 @@
  * A scene entry may also set `butterflyState` and/or `paintingState` -
  * how the wing sculptures / paintings should sit while that scene is
  * live, in the shared vocabulary from js/lightState.js ("filled",
- * "outline", "off", or a pulse/switch descriptor between them). Neither
- * field is required: a scene that omits one gets LIGHT_STATE_DEFAULT
- * ("filled" - everything illuminated), which is why plain scenes below
- * don't set them at all. This is separate from a scene's own
- * init/update/draw - "emanate"'s rippling animation, for instance, plays
- * on top of whatever butterflyState resolves to (default: filled),
- * rather than being that state itself.
+ * "outline", "off", or a pulse/switch descriptor between them) plus the
+ * spotlight/animated painting-only modes from js/paintings.js ("sequence",
+ * "random", "column", "row", "curtain", "wipe", "pulse"). Neither field is
+ * required: a scene that omits one gets LIGHT_STATE_DEFAULT ("filled" -
+ * everything illuminated), which is why plain scenes below don't set them
+ * at all. This is separate from a scene's own init/update/draw -
+ * "emanate"'s rippling animation, for instance, plays on top of whatever
+ * butterflyState resolves to (default: filled), rather than being that
+ * state itself.
+ *
+ * A scene may also set `overlay(pg)` - content drawn *after* the paintings/
+ * outlines' own steady state (drawShowOverlay(), called from
+ * js/wall.js's displayWall()), for an effect that needs to sit visibly on
+ * top of their opaque fill rather than underneath it, the way `draw` does.
+ * "spinner"'s cycling rings and "searchlight"'s beam-highlighted painting
+ * both need this: they trace/relight the painting's own silhouette, which a
+ * plain `draw` would have already been painted over by the time
+ * drawPaintings() ran.
  *
  * Paintings (js/paintings.js) and wing sculptures (js/outlines.js) are
  * drawn on top of every scene from js/wall.js's displayWall(), not listed
@@ -54,6 +65,16 @@
  */
 
 const SCENES = [
+  {
+    name: "black",
+    duration: 20000,
+    init: () => {},
+    update: () => {},
+    draw: (pg) => pg.background(0),
+    // paintingState/butterflyState omitted -> default "filled", so the
+    // paintings/sculptures still read normally against the plain black
+    // field rather than going dark themselves.
+  },
   {
     name: "mycelium",
     duration: 45000,
@@ -69,6 +90,16 @@ const SCENES = [
     draw: drawEmanateRipples, // js/outlines.js
     // butterflyState omitted -> defaults to "filled", so the sculptures
     // stay solid white while the ripples play on top.
+  },
+  {
+    name: "emanatePaintings",
+    duration: 40000,
+    init: () => {},
+    update: () => {},
+    draw: drawPaintingEmanateRipples, // js/paintings.js
+    // paintingState omitted -> defaults to "filled", so the paintings stay
+    // solid white while the ripples play on top - same as "emanate" does
+    // for the wing sculptures' butterflyState.
   },
   {
     name: "fireflies",
@@ -111,6 +142,84 @@ const SCENES = [
     init: initCircleWobble,
     update: updateCircleWobble,
     draw: drawCircleWobble, // js/circleWobble.js - shader-based
+  },
+  // The following are painting-choreography scenes: a plain black field so
+  // each painting mode (js/paintings.js) reads clearly on its own, rather
+  // than competing with a generative background.
+  {
+    name: "curtain",
+    duration: 30000,
+    init: () => {},
+    update: () => {},
+    draw: (pg) => pg.background(0),
+    paintingState: "curtain",
+  },
+  {
+    name: "wipe",
+    duration: 30000,
+    init: () => {},
+    update: () => {},
+    draw: (pg) => pg.background(0),
+    paintingState: "wipe",
+  },
+  {
+    name: "column",
+    duration: 30000,
+    init: () => {},
+    update: () => {},
+    draw: (pg) => pg.background(0),
+    paintingState: "column",
+  },
+  {
+    name: "row",
+    duration: 30000,
+    init: () => {},
+    update: () => {},
+    draw: (pg) => pg.background(0),
+    paintingState: "row",
+  },
+  {
+    name: "pulse",
+    duration: 30000,
+    init: () => {},
+    update: () => {},
+    draw: (pg) => pg.background(0),
+    paintingState: "pulse",
+  },
+  {
+    name: "burn",
+    duration: 30000,
+    init: () => {},
+    update: () => {},
+    draw: (pg) => pg.background(0),
+    paintingState: "burn",
+  },
+  {
+    name: "spinner",
+    duration: 30000,
+    init: () => {},
+    update: () => {},
+    draw: (pg) => pg.background(0),
+    overlay: drawSpinnerOutlines, // js/outlines.js
+    paintingState: "off",
+    butterflyState: "off",
+  },
+  {
+    name: "searchlight",
+    duration: 45000,
+    init: () => {},
+    update: () => {},
+    draw: (pg) => pg.background(0),
+    // The beam itself has to be drawn here, alongside the highlight, rather
+    // than in `draw` - `draw` runs before drawPaintings() paints each
+    // painting's opaque "off" (black) fill on top (see js/wall.js's
+    // displayWall()), which hid the beam behind every painting it swept
+    // near or paused on instead of lighting them up. See js/searchlight.js.
+    overlay: (pg) => {
+      drawSearchlights(pg);
+      drawSearchlightHighlights(pg);
+    },
+    paintingState: "off",
   },
   // One entry per file in js/video.js's VIDEO_FILES - see that file for
   // why these are generated instead of listed by hand here.
@@ -189,19 +298,16 @@ function drawShow(pg) {
   currentScene().draw(pg);
 }
 
-function displayShowStatus() {
-  if (!myFont) return;
+// See the file header note on `overlay` - most scenes don't set one.
+function drawShowOverlay(pg) {
+  if (currentScene().overlay) currentScene().overlay(pg);
+}
 
+// "scene 5/23: mycelium (12s)" - for the HUD (js/hud.js).
+function sceneStatusLine() {
   const scene = currentScene();
   const status = showPlaying
     ? `${Math.max(0, Math.ceil((scene.duration - lastElapsedInScene) / 1000))}s`
     : "manual";
-
-  fill(255);
-  noStroke();
-  text(
-    `scene: ${scene.name} (${status}) — arrows to switch, space to ${showPlaying ? "pause" : "sync & play"}`,
-    -width / 2 + 15,
-    -height / 2 + 100,
-  );
+  return `scene ${sceneIndex + 1}/${SCENES.length}: ${scene.name} (${status})`;
 }

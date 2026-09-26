@@ -45,19 +45,26 @@ function getPaintingPolygons() {
   return _paintingPolygonsCache;
 }
 
+// Axis-aligned bounding box of a single polygon - shared by getPaintingBounds()
+// below (every painting) and drawBurnVideoInPolygon() (js/paintings.js's
+// "burn" mode, one polygon at a time) as the cover-fit box for content that
+// doesn't warp to the painting's actual (possibly non-rectangular)
+// corner-pinned quad.
+function polygonBounds(poly) {
+  const xs = poly.map((p) => p.x);
+  const ys = poly.map((p) => p.y);
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  return {
+    x: minX,
+    y: minY,
+    w: Math.max(...xs) - minX,
+    h: Math.max(...ys) - minY,
+  };
+}
+
 function getPaintingBounds() {
-  return getPaintingPolygons().map((poly) => {
-    const xs = poly.map((p) => p.x);
-    const ys = poly.map((p) => p.y);
-    const minX = Math.min(...xs);
-    const minY = Math.min(...ys);
-    return {
-      x: minX,
-      y: minY,
-      w: Math.max(...xs) - minX,
-      h: Math.max(...ys) - minY,
-    };
-  });
+  return getPaintingPolygons().map(polygonBounds);
 }
 
 function pointInPolygon(x, y, poly) {
@@ -117,12 +124,10 @@ function drawPolygon(pg, poly, { fillColor, strokeColor, weight } = {}) {
 // "outline") without needing to sit through a specific scene - "auto"
 // (the default) defers back to whatever the current scene declares.
 //
-// "sequence" and "random" are spotlight modes: unlike the other states
-// (which apply the same resolved look to every painting), these light up a
-// moving *subset* of paintings - the rest "off" - stepping every
-// PAINTING_SPOTLIGHT_PERIOD seconds. Both are a sliding window over some
-// order of the paintings, differing only in what order they slide over and
-// how big the window is:
+// "sequence", "random", "column", and "row" are spotlight modes: unlike the
+// other states (which apply the same resolved look to every painting),
+// these light up a moving *subset* of paintings - the rest "off" - stepping
+// every PAINTING_SPOTLIGHT_PERIOD (or PAINTING_GROUP_PERIOD) seconds:
 //   - "sequence" slides a PAINTING_SEQUENCE_FRACTION-sized window over the
 //     paintingMaps in their plain index order, so the lit band visibly
 //     travels down the wall.
@@ -132,8 +137,22 @@ function drawPolygon(pg, poly, { fillColor, strokeColor, weight } = {}) {
 //     painting still gets an even share of lit time overall (a plain
 //     independent-coinflip-per-step version could leave some painting dark
 //     for a long stretch by chance, or light the same one twice running).
-// Both are handled specially in drawPaintings() below since they need the
-// painting count/order, not just a single resolved state.
+//   - "column"/"row" light up one whole column/row at a time (paintings
+//     grouped by physical position - see computePaintingGroups() below),
+//     stepping to the next column/row in wall order, so the lit band
+//     sweeps across (column) or down (row) the wall.
+// All four are handled specially in drawPaintings() below since they need
+// the painting count/order, not just a single resolved state.
+//
+// "curtain", "wipe", "pulse", and "burn" are per-painting animated modes -
+// each paints its own polygon per painting (curtain/pulse/burn offset so
+// paintings don't move in lockstep; wipe travels left-to-right across all of
+// them at once) rather than resolving one state for every painting alike.
+// "burn" is the odd one out among these: rather than only ever drawing a
+// solid/outlined version of the painting's own polygon, it also plays
+// assets/video/burn.mp4 (js/video.js) into it partway through each
+// painting's cycle - see drawBurnPaintings() below for the white -> video ->
+// black sequence.
 const PAINTING_LIGHT_OVERRIDES = [
   "auto",
   "filled",
@@ -142,6 +161,12 @@ const PAINTING_LIGHT_OVERRIDES = [
   "off",
   "sequence",
   "random",
+  "column",
+  "row",
+  "curtain",
+  "wipe",
+  "pulse",
+  "burn",
 ];
 let paintingLightOverride = "auto";
 const PAINTING_SPOTLIGHT_PERIOD = 1.5; // seconds between steps
@@ -160,8 +185,75 @@ function currentPaintingState() {
     : paintingLightOverride;
 }
 
+// "painting 3/12: auto (curtain)" - for the HUD (js/hud.js). Shows what
+// "auto" actually resolves to (the current scene's own paintingState)
+// rather than just the word "auto", since that's the more useful thing to
+// know at a glance.
+function paintingModeStatusLine() {
+  const idx = PAINTING_LIGHT_OVERRIDES.indexOf(paintingLightOverride);
+  const label =
+    paintingLightOverride === "auto"
+      ? `auto (${describeLightState(currentPaintingState())})`
+      : paintingLightOverride;
+  return `painting ${idx + 1}/${PAINTING_LIGHT_OVERRIDES.length}: ${label}`;
+}
+
 function isSpotlightMode(state) {
-  return state === "sequence" || state === "random";
+  return (
+    state === "sequence" ||
+    state === "random" ||
+    state === "column" ||
+    state === "row"
+  );
+}
+
+// Groups painting indices by physical position along `axis` ("x" for
+// columns, "y" for rows) - two paintings land in the same group when their
+// centroids are within half the average painting size along that axis, so
+// a real grid of paintings clusters into its actual columns/rows without
+// needing that layout declared by hand anywhere. Read fresh off
+// getPaintingPolygons()/getPaintingBounds() each call rather than cached -
+// cheap relative to the polygon math those already cache, and only ever
+// called from the "column"/"row" branch below (at most a couple of times a
+// frame, never the many-panels-times-many-paintings fan-out that made
+// getPaintingPolygons() itself worth caching).
+function computePaintingGroups(axis) {
+  const polygons = getPaintingPolygons();
+  if (polygons.length === 0) return [];
+
+  const bounds = getPaintingBounds();
+  const centroids = polygons.map(polygonCentroid);
+  const avgSize =
+    bounds.reduce((sum, b) => sum + (axis === "x" ? b.w : b.h), 0) /
+    bounds.length;
+  const threshold = avgSize * 0.5;
+
+  const order = centroids
+    .map((c, i) => ({ i, v: axis === "x" ? c.x : c.y }))
+    .sort((a, b) => a.v - b.v);
+
+  const groups = [];
+  order.forEach(({ i, v }) => {
+    const last = groups[groups.length - 1];
+    if (last && v - last.v < threshold) {
+      last.indices.push(i);
+      last.v = v;
+    } else {
+      groups.push({ v, indices: [i] });
+    }
+  });
+  return groups.map((g) => g.indices);
+}
+
+const PAINTING_GROUP_PERIOD = 1.8; // seconds a column/row stays lit before the next
+
+// Returns the Set of painting indices in whichever column/row is lit this
+// frame - one group at a time, in physical order, wrapping around.
+function groupLitIndices(axis) {
+  const groups = computePaintingGroups(axis);
+  if (groups.length === 0) return new Set();
+  const slot = Math.floor(millis() / (PAINTING_GROUP_PERIOD * 1000));
+  return new Set(groups[slot % groups.length]);
 }
 
 function shuffledIndices(count) {
@@ -181,6 +273,9 @@ let _spotlightShuffle = { order: [], cycle: -1, count: -1 };
 // band that slides one step per PAINTING_SPOTLIGHT_PERIOD through either
 // plain (0,1,2,...) or shuffled order, wrapping around.
 function spotlightLitIndices(mode, count) {
+  if (mode === "column" || mode === "row") {
+    return groupLitIndices(mode === "column" ? "x" : "y");
+  }
   if (count <= 0) return new Set();
   const slot = Math.floor(millis() / (PAINTING_SPOTLIGHT_PERIOD * 1000));
 
@@ -206,6 +301,258 @@ function spotlightLitIndices(mode, count) {
   return lit;
 }
 
+// Cheap deterministic pseudo-random in [0, 1) for painting `i` - used to
+// jitter the "curtain" mode's per-painting timing (see below) without
+// needing any stored per-painting state: every reader that passes the same
+// (i, salt) gets the same answer, so it's stable frame to frame on its own.
+function paintingHash(i, salt) {
+  const s = Math.sin(i * 12.9898 + salt * 78.233) * 43758.5453;
+  return s - Math.floor(s);
+}
+
+// "curtain": each painting opens/closes independently, expanding
+// horizontally from its own vertical centerline out to full width, holding
+// lit, then collapsing back to that centerline and holding closed - like a
+// theater curtain, but widening instead of parting. Every painting runs its
+// own cycle length (jittered +/-30% via paintingHash) and starts at its own
+// random point in that cycle, so they open/close at "random intervals
+// relative to one another" per the ask, and since their periods differ
+// they keep drifting out of step rather than ever settling into sync.
+const PAINTING_CURTAIN_OPEN = 1.2; // seconds to fully open
+const PAINTING_CURTAIN_HOLD = 2.5; // seconds held fully open
+const PAINTING_CURTAIN_CLOSE = 1.2; // seconds to fully close
+const PAINTING_CURTAIN_CLOSED_HOLD = 1.5; // seconds held fully closed
+const PAINTING_CURTAIN_BASE_PERIOD =
+  PAINTING_CURTAIN_OPEN +
+  PAINTING_CURTAIN_HOLD +
+  PAINTING_CURTAIN_CLOSE +
+  PAINTING_CURTAIN_CLOSED_HOLD;
+
+// Returns how open painting `i`'s curtain is right now: 0 (fully collapsed
+// to its centerline) to 1 (fully open).
+function curtainOpenFraction(i) {
+  const jitter = 0.7 + paintingHash(i, 1) * 0.6; // 0.7x - 1.3x this painting's period
+  const period = PAINTING_CURTAIN_BASE_PERIOD * jitter;
+  const phaseOffset = paintingHash(i, 2) * period;
+  const t = (millis() / 1000 + phaseOffset) % period;
+
+  const openEnd = PAINTING_CURTAIN_OPEN * jitter;
+  const holdEnd = openEnd + PAINTING_CURTAIN_HOLD * jitter;
+  const closeEnd = holdEnd + PAINTING_CURTAIN_CLOSE * jitter;
+
+  if (t < openEnd) return t / openEnd;
+  if (t < holdEnd) return 1;
+  if (t < closeEnd) return 1 - (t - holdEnd) / (closeEnd - holdEnd);
+  return 0;
+}
+
+// Interpolates poly's points toward its own centroid x (keeping y fixed) by
+// `fraction` - 1 is the untouched polygon, 0 collapses it to a zero-width
+// vertical line down its center.
+function curtainPolygon(poly, fraction) {
+  const centroid = polygonCentroid(poly);
+  return poly.map((p) => ({ x: lerpValue(centroid.x, p.x, fraction), y: p.y }));
+}
+
+function drawCurtainPaintings(pg, polygons) {
+  const offState = resolveLightState("off");
+  const litState = resolveLightState("filled");
+  polygons.forEach((poly, i) => {
+    // Opaque black base first - same reason "off"/"outline" are opaque
+    // black rather than transparent everywhere else in this file: without
+    // it, whatever the current scene is drawing behind the painting would
+    // show through the collapsed/closed portion of the curtain.
+    drawLightShape(pg, poly, offState, { strokeWeight: 9 });
+    const fraction = curtainOpenFraction(i);
+    if (fraction > 0.001) {
+      const litPoly = curtainPolygon(poly, fraction);
+      drawGlow(pg, litPoly);
+      drawLightShape(pg, litPoly, litState, { strokeWeight: 9 });
+    }
+  });
+}
+
+// "wipe": a wave sweeps left-to-right across the paintings fading them in,
+// holds them all lit, sweeps left-to-right again fading them out, holds
+// them all dark, then loops. Position is normalized against the paintings'
+// own leftmost/rightmost centroid (not the wall bounds), so the wave
+// visibly starts at the actual leftmost painting and ends at the actual
+// rightmost one regardless of how much wall space surrounds them.
+const PAINTING_WIPE_ON_DURATION = 2.5; // seconds for the on-sweep to cross every painting
+const PAINTING_WIPE_HOLD_DURATION = 3; // seconds held fully lit
+const PAINTING_WIPE_OFF_DURATION = 2.5; // seconds for the off-sweep to cross every painting
+const PAINTING_WIPE_CLOSED_HOLD = 1.5; // seconds held fully dark
+const PAINTING_WIPE_PERIOD =
+  PAINTING_WIPE_ON_DURATION +
+  PAINTING_WIPE_HOLD_DURATION +
+  PAINTING_WIPE_OFF_DURATION +
+  PAINTING_WIPE_CLOSED_HOLD;
+// How wide (in normalized position units, same 0-1 scale as
+// paintingWipePositions()) the fade band trailing the sweep edge is - a
+// painting crossfades from off to on (or on to off) over this much of the
+// sweep's travel instead of snapping the instant the edge reaches it.
+const PAINTING_WIPE_BAND = 0.18;
+
+// Each painting's centroid x, normalized 0 (leftmost painting) to 1
+// (rightmost painting).
+function paintingWipePositions(polygons) {
+  const xs = polygons.map((poly) => polygonCentroid(poly).x);
+  const minX = Math.min(...xs);
+  const span = Math.max(Math.max(...xs) - minX, 1);
+  return xs.map((x) => (x - minX) / span);
+}
+
+// Maps elapsed time t (0..duration) to a sweep position padded by
+// PAINTING_WIPE_BAND on both ends, so a painting at position 0 starts the
+// sweep already fully faded out and a painting at position 1 ends it fully
+// faded in (without the padding, the fade band would only be half-crossed
+// at either edge of the 0..1 span).
+function paintingWipeSweep(t, duration) {
+  return lerpValue(-PAINTING_WIPE_BAND, 1 + PAINTING_WIPE_BAND, t / duration);
+}
+
+// Returns each painting's on-ness (0 = fully dark, 1 = fully lit) for the
+// current moment in the wipe cycle described above, crossfading over
+// PAINTING_WIPE_BAND as the sweep edge passes each painting's position.
+function wipeLitFractions(polygons) {
+  const positions = paintingWipePositions(polygons);
+  const t = (millis() / 1000) % PAINTING_WIPE_PERIOD;
+
+  if (t < PAINTING_WIPE_ON_DURATION) {
+    const sweep = paintingWipeSweep(t, PAINTING_WIPE_ON_DURATION);
+    return positions.map((p) =>
+      constrain((sweep - p) / PAINTING_WIPE_BAND + 0.5, 0, 1),
+    );
+  }
+  if (t < PAINTING_WIPE_ON_DURATION + PAINTING_WIPE_HOLD_DURATION) {
+    return positions.map(() => 1);
+  }
+  if (
+    t <
+    PAINTING_WIPE_ON_DURATION +
+      PAINTING_WIPE_HOLD_DURATION +
+      PAINTING_WIPE_OFF_DURATION
+  ) {
+    const tOff = t - PAINTING_WIPE_ON_DURATION - PAINTING_WIPE_HOLD_DURATION;
+    const sweep = paintingWipeSweep(tOff, PAINTING_WIPE_OFF_DURATION);
+    return positions.map(
+      (p) => 1 - constrain((sweep - p) / PAINTING_WIPE_BAND + 0.5, 0, 1),
+    );
+  }
+  return positions.map(() => 0);
+}
+
+function drawWipePaintings(pg, polygons) {
+  const fractions = wipeLitFractions(polygons);
+  const onKeyframe = lightStateKeyframe("filled");
+  const offKeyframe = lightStateKeyframe("off");
+  polygons.forEach((poly, i) => {
+    const resolved = crossfadeKeyframes(offKeyframe, onKeyframe, fractions[i]);
+    drawLightShape(pg, poly, resolved, { strokeWeight: 9 });
+  });
+}
+
+// "pulse": every painting fades black<->white on its own sinusoidal cycle,
+// each offset from the next by PAINTING_PULSE_OFFSET_STEP of a cycle (via
+// resolveLightState's phaseOffset - js/lightState.js) so the pulse visibly
+// ripples across the paintings in index order rather than every painting
+// breathing in lockstep.
+const PAINTING_PULSE_PERIOD = 4; // seconds for one full black<->white cycle
+const PAINTING_PULSE_OFFSET_STEP = 0.15; // fraction of a cycle between neighboring paintings
+
+function drawPulsePaintings(pg, polygons) {
+  polygons.forEach((poly, i) => {
+    const resolved = resolveLightState({
+      mode: "pulse",
+      states: ["off", "filled"],
+      period: PAINTING_PULSE_PERIOD,
+      phaseOffset: i * PAINTING_PULSE_OFFSET_STEP,
+    });
+    drawLightShape(pg, poly, resolved, { strokeWeight: 9 });
+  });
+}
+
+// "burn": each painting independently cycles white -> burn video -> black
+// -> (dark hold) -> repeat, on its own jittered schedule (paintingHash, same
+// technique as "curtain" above) so paintings ignite at staggered, "random"
+// looking intervals rather than all lighting up together. The white flash
+// and the video itself play at fixed real-world durations (BURN_VIDEO_PATH
+// - js/video.js - actually decodes in real time, so it can't be sped up/
+// slowed down the way curtain's whole cycle is jittered); only the dark
+// hold between bursts is randomized per painting, which is what varies each
+// painting's overall period.
+const BURN_WHITE_DURATION = 1; // seconds the painting flashes solid white before the video starts
+const BURN_BLACK_HOLD_MIN = 5; // seconds held dark after the video ends, at minimum
+const BURN_BLACK_HOLD_RANGE = 10; // extra seconds of dark hold, randomized per painting on top of the min
+// Matches assets/video/burn.mp4's actual duration (see js/video.js) - used
+// only as a fallback before that video element's own metadata has loaded,
+// since burnVideoDuration() prefers the real duration once available.
+const BURN_VIDEO_FALLBACK_DURATION = 3.77;
+
+function burnVideoDuration(v) {
+  const d = v && v.duration ? v.duration() : 0;
+  return Number.isFinite(d) && d > 0 ? d : BURN_VIDEO_FALLBACK_DURATION;
+}
+
+// Draws video `v`'s current frame cover-fit into `poly`'s bounding box, then
+// clips it to `poly`'s actual (possibly non-rectangular, corner-pinned)
+// shape - pg.clip()'s mask callback runs beginShape/vertex/endShape same as
+// drawPolygon() above, and wrapping the whole thing in push()/pop() scopes
+// the clip to just this draw (p5's clip persists on the canvas context
+// until the next pop()/restore(), same as any other drawing state).
+function drawBurnVideoInPolygon(pg, v, poly) {
+  if (!v || v.width === 0) return; // metadata/first frame not loaded yet - same guard as drawVideoScene() (js/video.js)
+  const bounds = polygonBounds(poly);
+  pg.push();
+  pg.clip(() => {
+    pg.beginShape();
+    poly.forEach((p) => pg.vertex(p.x, p.y));
+    pg.endShape(CLOSE);
+  });
+  drawVideoCover(pg, v, bounds.x, bounds.y, bounds.w, bounds.h); // js/video.js
+  pg.pop();
+}
+
+// Whether painting `i` was in its "burn" (video-playing) phase last frame -
+// needed only so entering that phase can seek the video to 0 and start it
+// playing exactly once, rather than every frame; curtain/wipe/pulse don't
+// need anything like this since they only ever draw shapes, never drive a
+// stateful <video> element.
+let _burnWasPlaying = [];
+
+function drawBurnPaintings(pg, polygons) {
+  const whiteState = resolveLightState("filled");
+  const offState = resolveLightState("off");
+  polygons.forEach((poly, i) => {
+    const v = burnVideoElements[i]; // js/video.js
+    const videoDuration = burnVideoDuration(v);
+    const blackHold =
+      BURN_BLACK_HOLD_MIN + paintingHash(i, 5) * BURN_BLACK_HOLD_RANGE;
+    const period = BURN_WHITE_DURATION + videoDuration + blackHold;
+    const phaseOffset = paintingHash(i, 6) * period;
+    const t = (millis() / 1000 + phaseOffset) % period;
+
+    const burnStart = BURN_WHITE_DURATION;
+    const burnEnd = burnStart + videoDuration;
+    const burning = t >= burnStart && t < burnEnd;
+
+    if (burning) {
+      if (!_burnWasPlaying[i] && v) {
+        v.time(0);
+        v.play();
+      }
+      drawBurnVideoInPolygon(pg, v, poly);
+    } else {
+      if (_burnWasPlaying[i] && v) v.pause();
+      const white = t < burnStart;
+      drawLightShape(pg, poly, white ? whiteState : offState, {
+        strokeWeight: 9,
+      });
+    }
+    _burnWasPlaying[i] = burning;
+  });
+}
+
 function drawPaintings(pg) {
   const stateValue = currentPaintingState();
   const polygons = getPaintingPolygons();
@@ -222,6 +569,11 @@ function drawPaintings(pg) {
     return;
   }
 
+  if (stateValue === "curtain") return drawCurtainPaintings(pg, polygons);
+  if (stateValue === "wipe") return drawWipePaintings(pg, polygons);
+  if (stateValue === "pulse") return drawPulsePaintings(pg, polygons);
+  if (stateValue === "burn") return drawBurnPaintings(pg, polygons);
+
   const resolved = resolveLightState(stateValue);
   const lit = isLitState(resolved);
 
@@ -229,4 +581,16 @@ function drawPaintings(pg) {
     if (lit && isGlowMode(stateValue)) drawGlow(pg, poly);
     drawLightShape(pg, poly, resolved, { strokeWeight: 9 });
   });
+}
+
+// The "emanatePaintings" scene's own animation (js/scenes.js, set as that
+// scene's `draw`) - same rippling-ring effect as "emanate" (js/outlines.js's
+// drawEmanateRipples), just around every painting's own quad instead of a
+// wing sculpture's silhouette. Layered on top of drawPaintings' steady state
+// (drawn separately, from js/wall.js) rather than replacing it, and skipped
+// while calibrating so the ripples don't obscure judging a painting's
+// corner-pin alignment - same reasoning as drawEmanateRipples.
+function drawPaintingEmanateRipples(pg) {
+  if (isCalibratingMapper()) return;
+  getPaintingPolygons().forEach((poly) => drawEmanateRipplesOnPolygon(pg, poly));
 }

@@ -33,7 +33,7 @@
  * both reproduced verbatim.
  */
 
-const RD_SEED_COUNT = 4;
+const RD_SEED_COUNT = 234;
 const RD_SEED_JITTER = 0.006; // noise-space step per frame - lower = slower wander
 
 const RD_VERT = `#version 300 es
@@ -226,10 +226,13 @@ function rdSeedCanvas() {
 
 function rdInitSeeds() {
   rdSeeds = [];
+  const w = rdCanvas.width;
+  const h = rdCanvas.height;
   for (let i = 0; i < RD_SEED_COUNT; i++) {
     rdSeeds.push({
-      nx: random(1000),
-      ny: random(1000),
+      x: random(w),
+      y: random(h),
+      nAngle: random(1000),
       ink: random() < 0.5 ? 255 : 0,
       size: random(4, 10),
     });
@@ -241,18 +244,24 @@ function rdInitSeeds() {
 // canvas (in the same WALL_BOUNDS logical space every other scene uses)
 // and lays down ink as it goes, so the reaction-diffusion loop always has
 // something fresh to chew on instead of converging to a static blur.
+//
+// Position is a running random walk (noise drives heading, not absolute
+// coordinates) that wraps at the canvas edges, rather than mapping
+// noise() straight to x/y - noise() output is bell-shaped around 0.5, so
+// used directly as a coordinate it rarely swings out near the edges and
+// every seed ends up clumped toward the center.
 function rdUpdateSeeds() {
   const w = rdCanvas.width;
   const h = rdCanvas.height;
   rdCanvas.push();
   rdCanvas.translate(-w / 2, -h / 2);
   rdSeeds.forEach((s) => {
-    s.nx += RD_SEED_JITTER;
-    s.ny += RD_SEED_JITTER;
-    const x = noise(s.nx) * w;
-    const y = noise(s.ny) * h;
+    s.nAngle += RD_SEED_JITTER;
+    const angle = noise(s.nAngle) * TWO_PI * 4;
+    s.x = (s.x + Math.cos(angle) * 2 + w) % w;
+    s.y = (s.y + Math.sin(angle) * 2 + h) % h;
     rdCanvas.fill(s.ink);
-    rdCanvas.circle(x, y, s.size);
+    rdCanvas.circle(s.x, s.y, s.size);
   });
   rdCanvas.pop();
 }

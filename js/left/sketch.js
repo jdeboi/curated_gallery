@@ -45,10 +45,12 @@ const OUTLINE_SPECS = [
   },
 ];
 
-// No blackout masks needed on left wall yet - see js/right/sketch.js for
-// how to add one (a freeform PolyMap painted solid black, drawn as a
-// screen-space overlay on top of every panel - see js/masks.js).
-const MASK_SPECS = [];
+// One entry per blackout mask - a freeform polygon painted solid black,
+// drawn as a screen-space overlay on top of every panel (see js/masks.js).
+// `numPoints` sets how many draggable vertices it starts with - drag them
+// during calibration (press "c") to trace the exact area to cover. See
+// js/right/sketch.js's own MASK_SPECS for more on the convention.
+const MASK_SPECS = [{ numPoints: 11 }];
 
 // Same idea as MASK_SPECS, but a smooth freeform BezierMap instead of a
 // straight-edged PolyMap - see js/right/sketch.js's BEZIER_MASK_SPECS.
@@ -68,6 +70,7 @@ let bezierMaskMaps = [];
 
 let myFont;
 let wallImg;
+let showWallImage = false; // toggled with "b" - reference photo of the physical wall, for calibration
 
 function setup() {
   createCanvas(windowWidth, windowHeight, WEBGL);
@@ -107,6 +110,7 @@ function setup() {
   paintingMaps = PAINTING_SPECS.map((s) =>
     pMapper.createQuadMap(s.w, s.h, s.res, s.res),
   );
+  loadBurnVideos(PAINTING_SPECS.length); // js/video.js - one <video> element per painting, for the "burn" painting mode
 
   // Each outline gets a QuadMap sized to its own SVG viewBox, used purely
   // as a corner-pin frame - see js/outlines.js for why the traced shape
@@ -118,6 +122,13 @@ function setup() {
   butterflyMaps = OUTLINE_SPECS.map((spec) =>
     pMapper.createQuadMap(spec.width, spec.height, 2, 2),
   );
+
+  maskMaps = MASK_SPECS.map((spec) => pMapper.createPolyMap(spec.numPoints));
+  spreadDefaultPositions(maskMaps, {
+    originX: -900,
+    originY: -350,
+    spacing: 40,
+  });
 
   initShow();
 
@@ -137,7 +148,7 @@ function setup() {
 function draw() {
   background(0);
 
-  if (wallImg)
+  if (showWallImage && wallImg)
     image(
       wallImg,
       -width / 2,
@@ -146,14 +157,15 @@ function draw() {
       wallImg.height * 0.35,
     );
 
-  displayFrameRate();
-  displayParentingStatus();
-  displayShowStatus();
-
   updateShow();
   displayWall();
   drawBlackoutMasksOverlay();
   drawSurfaceLabels();
+
+  // Drawn last so it always sits on top of the wall content instead of
+  // getting painted over by it - paintings/outlines/generative scenes can
+  // all cover screen area up near the top-left corner where the HUD lives.
+  displayHUD();
 }
 
 function keyPressed() {
@@ -185,6 +197,12 @@ function keyPressed() {
     case "p":
       toggleParentingLocked();
       break;
+    case "h":
+      toggleHUD();
+      break;
+    case "b":
+      showWallImage = !showWallImage;
+      break;
     case "ArrowRight":
       nextScene();
       break;
@@ -199,12 +217,4 @@ function keyPressed() {
 
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
-}
-
-function displayFrameRate() {
-  if (!myFont) return; // font hasn't finished loading yet
-
-  fill(255);
-  noStroke();
-  text(round(frameRate()), -width / 2 + 15, -height / 2 + 50);
 }
