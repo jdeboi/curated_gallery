@@ -1,8 +1,9 @@
 /*
  * A small swarm of butterflies - unlike js/birds.js's boids, these don't
  * flock (no separate/align/cohere pulling them toward each other): each
- * butterfly just wanders independently, steered back inward near a wall
- * edge, with a min-speed floor so it never stalls. Drawn from a 4-frame
+ * butterfly just wanders independently, wrapping around to the opposite
+ * edge when it flies off the wall, with a min-speed floor so it never
+ * stalls. Drawn from a 4-frame
  * wingbeat sheet (assets/butterfly_sprite.png) the same way js/birds.js
  * animates assets/bird_sprite.png, plus a per-butterfly random size.
  */
@@ -10,8 +11,6 @@
 const BUTTERFLY_COUNT = 20;
 const BUTTERFLY_MAX_SPEED = 3;
 const BUTTERFLY_MIN_SPEED = 1.2;
-const BUTTERFLY_EDGE_MARGIN = 50; // soft-steer back inward within this of a wall edge
-const BUTTERFLY_EDGE_FORCE = 0.15; // stronger than wander so an edge always wins
 
 const BUTTERFLY_SPRITE_PATH = "assets/butterfly_sprite.png";
 const BUTTERFLY_SPRITE_FRAMES = 4; // one wingbeat cycle, laid out left to right in the sheet
@@ -62,29 +61,10 @@ class Butterfly {
     this.ay += dy;
   }
 
-  keepInBounds() {
-    let desiredX = null;
-    let desiredY = null;
-    if (this.x < BUTTERFLY_EDGE_MARGIN) desiredX = BUTTERFLY_MAX_SPEED;
-    else if (this.x > WALL_BOUNDS.w - BUTTERFLY_EDGE_MARGIN)
-      desiredX = -BUTTERFLY_MAX_SPEED;
-    if (this.y < BUTTERFLY_EDGE_MARGIN) desiredY = BUTTERFLY_MAX_SPEED;
-    else if (this.y > WALL_BOUNDS.h - BUTTERFLY_EDGE_MARGIN)
-      desiredY = -BUTTERFLY_MAX_SPEED;
-
-    if (desiredX !== null || desiredY !== null) {
-      this.steerToward(
-        desiredX ?? this.vx,
-        desiredY ?? this.vy,
-        BUTTERFLY_EDGE_FORCE,
-      );
-    }
-  }
-
   // Same per-boid noise-drift trick as js/birds.js's wander() - a smoothly
-  // varying nudge every frame is this butterfly's only steering (besides
-  // keepInBounds()) now that there's no flocking pulling it toward others,
-  // so this alone is what keeps it roaming instead of drifting straight.
+  // varying nudge every frame is this butterfly's only steering now that
+  // there's no flocking pulling it toward others, so this alone is what
+  // keeps it roaming instead of drifting straight.
   wander() {
     this.wanderNoise += 0.01;
     const angle = noise(this.wanderNoise) * TWO_PI * 2;
@@ -108,10 +88,12 @@ class Butterfly {
     this.ax = 0;
     this.ay = 0;
 
-    // Safety clamp - see js/birds.js's own update() for why the soft edge
-    // steer above isn't relied on alone to keep it on the wall.
-    this.x = constrain(this.x, 0, WALL_BOUNDS.w);
-    this.y = constrain(this.y, 0, WALL_BOUNDS.h);
+    // Wrap around the wall edges instead of bouncing/clamping - a butterfly
+    // that flies off one side reappears on the opposite side.
+    if (this.x < 0) this.x += WALL_BOUNDS.w;
+    else if (this.x > WALL_BOUNDS.w) this.x -= WALL_BOUNDS.w;
+    if (this.y < 0) this.y += WALL_BOUNDS.h;
+    else if (this.y > WALL_BOUNDS.h) this.y -= WALL_BOUNDS.h;
   }
 }
 
@@ -127,7 +109,6 @@ function initButterflies() {
 
 function updateButterflies() {
   butterflies.forEach((b) => {
-    b.keepInBounds();
     b.wander();
     b.update();
   });

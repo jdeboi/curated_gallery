@@ -1,8 +1,8 @@
 /*
  * Video-loop scenes: each file in VIDEO_FILES becomes its own scene in the
  * shared SCENES rotation (js/scenes.js), looping full-bleed across the
- * whole wall the same way js/reactionDiffusion.js/js/circleWobble.js fill
- * it with a shader - draw straight into the wall panel's own 2D graphics
+ * whole wall the same way js/reactionDiffusion.js fills it with a shader -
+ * draw straight into the wall panel's own 2D graphics
  * buffer via pg.image(), since a p5.MediaElement (what createVideo()
  * returns) can be drawn with image() same as any other texture source, no
  * WEBGL side-buffer needed here.
@@ -36,7 +36,7 @@ const VIDEO_FILES = [
   // { path: "assets/video/ovalspin.mp4" },
   // { path: "assets/video/pixels.mp4", tile: 2 },
   // { path: "assets/video/rectspin.mp4" },
-  { path: "assets/video/sparklediamond.mp4" },
+  // { path: "assets/video/sparklediamond.mp4" },
   // { path: "assets/video/waves.mp4" },
   // { path: "assets/video/wavyvertlines.mp4" },
 ];

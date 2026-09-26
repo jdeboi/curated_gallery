@@ -4,7 +4,7 @@
  *
  * A physical wall with a curve/bend can't be corner-pinned as a single
  * flat QuadMap - each flat segment needs its own independent corner-pin.
- * But the generative scenes (mycelium, particles, snake), the rippling
+ * But the generative scenes (mycelium, particles, vines), the rippling
  * emanate outlines, and the painting/outline geometry they steer around,
  * all want to think in one continuous coordinate space so content can flow
  * across the seam between panels rather than being siloed per-panel.

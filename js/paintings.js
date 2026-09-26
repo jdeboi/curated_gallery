@@ -122,25 +122,26 @@ function drawPolygon(pg, poly, { fillColor, strokeColor, weight } = {}) {
 // "outline") without needing to sit through a specific scene - "auto"
 // (the default) defers back to whatever the current scene declares.
 //
-// "sequence", "random", "column", and "row" are spotlight modes: unlike the
-// other states (which apply the same resolved look to every painting),
-// these light up a moving *subset* of paintings - the rest "off" - stepping
-// every PAINTING_SPOTLIGHT_PERIOD (or PAINTING_GROUP_PERIOD) seconds:
+// "sequence", "column", and "row" are spotlight modes: unlike the other
+// states (which apply the same resolved look to every painting), these
+// light up a moving *subset* of paintings - the rest "off" - stepping every
+// PAINTING_SPOTLIGHT_PERIOD (or PAINTING_GROUP_PERIOD) seconds:
 //   - "sequence" slides a PAINTING_SEQUENCE_FRACTION-sized window over the
 //     paintingMaps in their plain index order, so the lit band visibly
 //     travels down the wall.
-//   - "random" slides a (larger) PAINTING_RANDOM_FRACTION-sized window over
-//     a freshly shuffled order each time it's cycled all the way through,
-//     so which paintings are lit looks random step to step while every
-//     painting still gets an even share of lit time overall (a plain
-//     independent-coinflip-per-step version could leave some painting dark
-//     for a long stretch by chance, or light the same one twice running).
 //   - "column"/"row" light up one whole column/row at a time (paintings
 //     grouped by physical position - see computePaintingGroups() below),
 //     stepping to the next column/row in wall order, so the lit band
 //     sweeps across (column) or down (row) the wall.
-// All four are handled specially in drawPaintings() below since they need
+// All three are handled specially in drawPaintings() below since they need
 // the painting count/order, not just a single resolved state.
+//
+// "random" shares the "curtain" mode's own per-painting on/off timing (same
+// PAINTING_CURTAIN_* durations, same jittered period + phase offset per
+// painting via curtainOpenFraction()) rather than a shared stepped window -
+// each painting just fades between "off" and "filled" as its own fraction
+// rises and falls, so it needs no group/order bookkeeping of its own and
+// naturally looks random since every painting runs on an independent timer.
 //
 // "curtain", "wipe", and "pulse" are per-painting animated modes - each
 // paints its own polygon per painting (curtain/pulse offset so paintings
@@ -149,7 +150,6 @@ function drawPolygon(pg, poly, { fillColor, strokeColor, weight } = {}) {
 const PAINTING_LIGHT_OVERRIDES = [
   "auto",
   "filled",
-  "glow",
   "outline",
   "off",
   "sequence",
@@ -163,7 +163,6 @@ const PAINTING_LIGHT_OVERRIDES = [
 let paintingLightOverride = "auto";
 const PAINTING_SPOTLIGHT_PERIOD = 1.5; // seconds between steps
 const PAINTING_SEQUENCE_FRACTION = 1 / 3; // fraction of paintings lit at once
-const PAINTING_RANDOM_FRACTION = 1 / 2; // fraction of paintings lit at once
 
 function cyclePaintingLightMode() {
   const idx = PAINTING_LIGHT_OVERRIDES.indexOf(paintingLightOverride);
@@ -191,12 +190,7 @@ function paintingModeStatusLine() {
 }
 
 function isSpotlightMode(state) {
-  return (
-    state === "sequence" ||
-    state === "random" ||
-    state === "column" ||
-    state === "row"
-  );
+  return state === "sequence" || state === "column" || state === "row";
 }
 
 // Groups painting indices by physical position along `axis` ("x" for
@@ -248,48 +242,22 @@ function groupLitIndices(axis) {
   return new Set(groups[slot % groups.length]);
 }
 
-function shuffledIndices(count) {
-  const order = Array.from({ length: count }, (_, i) => i);
-  for (let i = order.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [order[i], order[j]] = [order[j], order[i]];
-  }
-  return order;
-}
-
-// Reshuffled once per full pass through the paintings (see comment above),
-// keyed on `cycle` so repeated calls within the same pass reuse it.
-let _spotlightShuffle = { order: [], cycle: -1, count: -1 };
-
-// Returns the Set of painting indices lit this frame: a `windowSize`-wide
-// band that slides one step per PAINTING_SPOTLIGHT_PERIOD through either
-// plain (0,1,2,...) or shuffled order, wrapping around.
+// Returns the Set of painting indices lit this frame: a
+// PAINTING_SEQUENCE_FRACTION-wide band that slides one step per
+// PAINTING_SPOTLIGHT_PERIOD through the paintings in plain index order,
+// wrapping around. ("column"/"row" delegate to groupLitIndices() instead;
+// "random" doesn't come through here at all - see drawRandomPaintings().)
 function spotlightLitIndices(mode, count) {
   if (mode === "column" || mode === "row") {
     return groupLitIndices(mode === "column" ? "x" : "y");
   }
   if (count <= 0) return new Set();
   const slot = Math.floor(millis() / (PAINTING_SPOTLIGHT_PERIOD * 1000));
-
-  let order;
-  let windowSize;
-  let step;
-  if (mode === "sequence") {
-    order = Array.from({ length: count }, (_, i) => i);
-    windowSize = Math.max(1, Math.round(count * PAINTING_SEQUENCE_FRACTION));
-    step = slot % count;
-  } else {
-    windowSize = Math.max(1, Math.round(count * PAINTING_RANDOM_FRACTION));
-    const cycle = Math.floor(slot / count);
-    if (cycle !== _spotlightShuffle.cycle || count !== _spotlightShuffle.count) {
-      _spotlightShuffle = { order: shuffledIndices(count), cycle, count };
-    }
-    order = _spotlightShuffle.order;
-    step = slot % count;
-  }
+  const windowSize = Math.max(1, Math.round(count * PAINTING_SEQUENCE_FRACTION));
+  const step = slot % count;
 
   const lit = new Set();
-  for (let i = 0; i < windowSize; i++) lit.add(order[(step + i) % count]);
+  for (let i = 0; i < windowSize; i++) lit.add((step + i) % count);
   return lit;
 }
 
@@ -311,9 +279,9 @@ function paintingHash(i, salt) {
 // relative to one another" per the ask, and since their periods differ
 // they keep drifting out of step rather than ever settling into sync.
 const PAINTING_CURTAIN_OPEN = 1.2; // seconds to fully open
-const PAINTING_CURTAIN_HOLD = 2.5; // seconds held fully open
+const PAINTING_CURTAIN_HOLD = 8; // seconds held fully open
 const PAINTING_CURTAIN_CLOSE = 1.2; // seconds to fully close
-const PAINTING_CURTAIN_CLOSED_HOLD = 1.5; // seconds held fully closed
+const PAINTING_CURTAIN_CLOSED_HOLD = 6; // seconds held fully closed
 const PAINTING_CURTAIN_BASE_PERIOD =
   PAINTING_CURTAIN_OPEN +
   PAINTING_CURTAIN_HOLD +
@@ -338,12 +306,31 @@ function curtainOpenFraction(i) {
   return 0;
 }
 
-// Interpolates poly's points toward its own centroid x (keeping y fixed) by
-// `fraction` - 1 is the untouched polygon, 0 collapses it to a zero-width
-// vertical line down its center.
+// Interpolates each corner toward its own edge's midpoint - top corners
+// toward the top edge's midpoint, bottom corners toward the bottom edge's
+// midpoint - by `fraction`: 1 is the untouched polygon, 0 collapses it to a
+// zero-length line connecting those two midpoints. Relies on poly being a
+// QUAD's four getControlPoints() corners in their p5.mapper order: TL, TR,
+// BR, BL.
+//
+// This used to collapse every corner toward the polygon's centroid x while
+// holding y fixed, which looked fine for an axis-aligned rectangle but not
+// for a corner-pinned quad, where the top and bottom edges are rarely
+// perfectly horizontal - as the curtain narrowed, that fixed y-gap between
+// e.g. TL and TR stayed constant while the x-gap between them shrank toward
+// zero, so the top/bottom edges visibly swung to a steep angle right before
+// closing. Collapsing each corner along its own edge instead keeps that
+// edge's angle constant all the way down to a point.
 function curtainPolygon(poly, fraction) {
-  const centroid = polygonCentroid(poly);
-  return poly.map((p) => ({ x: lerpValue(centroid.x, p.x, fraction), y: p.y }));
+  const [tl, tr, br, bl] = poly;
+  const topMid = { x: lerpValue(tl.x, tr.x, 0.5), y: lerpValue(tl.y, tr.y, 0.5) };
+  const bottomMid = { x: lerpValue(bl.x, br.x, 0.5), y: lerpValue(bl.y, br.y, 0.5) };
+  return [
+    { x: lerpValue(topMid.x, tl.x, fraction), y: lerpValue(topMid.y, tl.y, fraction) },
+    { x: lerpValue(topMid.x, tr.x, fraction), y: lerpValue(topMid.y, tr.y, fraction) },
+    { x: lerpValue(bottomMid.x, br.x, fraction), y: lerpValue(bottomMid.y, br.y, fraction) },
+    { x: lerpValue(bottomMid.x, bl.x, fraction), y: lerpValue(bottomMid.y, bl.y, fraction) },
+  ];
 }
 
 function drawCurtainPaintings(pg, polygons) {
@@ -358,18 +345,35 @@ function drawCurtainPaintings(pg, polygons) {
     const fraction = curtainOpenFraction(i);
     if (fraction > 0.001) {
       const litPoly = curtainPolygon(poly, fraction);
-      drawGlow(pg, litPoly);
       drawLightShape(pg, litPoly, litState, { strokeWeight: 9 });
     }
   });
 }
 
+// "random": every painting independently fades between "off" and "filled" on
+// the exact same per-painting timer as "curtain" (curtainOpenFraction() -
+// same PAINTING_CURTAIN_* durations, same jittered period and phase offset
+// per painting), just without warping the polygon - so the two modes share
+// identical on/off timing and only differ in how the "on" painting looks.
+function drawRandomPaintings(pg, polygons) {
+  const offKeyframe = lightStateKeyframe("off");
+  const onKeyframe = lightStateKeyframe("filled");
+  polygons.forEach((poly, i) => {
+    const resolved = crossfadeKeyframes(offKeyframe, onKeyframe, curtainOpenFraction(i));
+    drawLightShape(pg, poly, resolved, { strokeWeight: 9 });
+  });
+}
+
 // "wipe": a wave sweeps left-to-right across the paintings fading them in,
 // holds them all lit, sweeps left-to-right again fading them out, holds
-// them all dark, then loops. Position is normalized against the paintings'
-// own leftmost/rightmost centroid (not the wall bounds), so the wave
-// visibly starts at the actual leftmost painting and ends at the actual
-// rightmost one regardless of how much wall space surrounds them.
+// them all dark, then loops. Position is normalized against the wipe
+// participants' own leftmost/rightmost centroid (not the wall bounds), so
+// the wave visibly starts at the actual leftmost participant and ends at
+// the actual rightmost one regardless of how much wall space surrounds
+// them. "Participants" is paintings alone unless the wing sculptures
+// (js/outlines.js) are *also* set to "wipe" (scene-declared or via the "q"
+// override) - see wipeBasisPolygons() - in which case both join one shared
+// sweep instead of each running its own independently-normalized one.
 const PAINTING_WIPE_ON_DURATION = 2.5; // seconds for the on-sweep to cross every painting
 const PAINTING_WIPE_HOLD_DURATION = 3; // seconds held fully lit
 const PAINTING_WIPE_OFF_DURATION = 2.5; // seconds for the off-sweep to cross every painting
@@ -380,45 +384,64 @@ const PAINTING_WIPE_PERIOD =
   PAINTING_WIPE_OFF_DURATION +
   PAINTING_WIPE_CLOSED_HOLD;
 // How wide (in normalized position units, same 0-1 scale as
-// paintingWipePositions()) the fade band trailing the sweep edge is - a
-// painting crossfades from off to on (or on to off) over this much of the
-// sweep's travel instead of snapping the instant the edge reaches it.
+// wipeBasisStats()) the fade band trailing the sweep edge is - a painting
+// crossfades from off to on (or on to off) over this much of the sweep's
+// travel instead of snapping the instant the edge reaches it.
 const PAINTING_WIPE_BAND = 0.18;
 
-// Each painting's centroid x, normalized 0 (leftmost painting) to 1
-// (rightmost painting).
-function paintingWipePositions(polygons) {
-  const xs = polygons.map((poly) => polygonCentroid(poly).x);
-  const minX = Math.min(...xs);
-  const span = Math.max(Math.max(...xs) - minX, 1);
-  return xs.map((x) => (x - minX) / span);
+// Every polygon that should share the current "wipe" sweep this frame -
+// paintings when paintingState is "wipe", wing sculptures when
+// butterflyState is "wipe" (js/outlines.js), both/either/neither depending
+// on what's currently live. Cached per frame since both drawPaintings() and
+// every drawButterflyLightState() call (one per sculpture) need the same
+// answer.
+let _wipeBasisStatsCache = null;
+let _wipeBasisStatsCacheFrame = -1;
+
+function wipeBasisPolygons() {
+  const polys = [];
+  if (currentPaintingState() === "wipe") polys.push(...getPaintingPolygons());
+  if (currentButterflyState() === "wipe") polys.push(...getOutlinePolygons());
+  return polys;
+}
+
+function wipeBasisStats() {
+  if (_wipeBasisStatsCacheFrame === frameCount) return _wipeBasisStatsCache;
+  const xs = wipeBasisPolygons().map((poly) => polygonCentroid(poly).x);
+  const minX = xs.length ? Math.min(...xs) : 0;
+  const span = xs.length ? Math.max(Math.max(...xs) - minX, 1) : 1;
+  _wipeBasisStatsCache = { minX, span };
+  _wipeBasisStatsCacheFrame = frameCount;
+  return _wipeBasisStatsCache;
+}
+
+// A single polygon's centroid x normalized 0 (leftmost participant) to 1
+// (rightmost participant) against this frame's shared wipe basis.
+function wipePosition(poly) {
+  const { minX, span } = wipeBasisStats();
+  return (polygonCentroid(poly).x - minX) / span;
 }
 
 // Maps elapsed time t (0..duration) to a sweep position padded by
-// PAINTING_WIPE_BAND on both ends, so a painting at position 0 starts the
-// sweep already fully faded out and a painting at position 1 ends it fully
+// PAINTING_WIPE_BAND on both ends, so a participant at position 0 starts
+// the sweep already fully faded out and one at position 1 ends it fully
 // faded in (without the padding, the fade band would only be half-crossed
 // at either edge of the 0..1 span).
 function paintingWipeSweep(t, duration) {
   return lerpValue(-PAINTING_WIPE_BAND, 1 + PAINTING_WIPE_BAND, t / duration);
 }
 
-// Returns each painting's on-ness (0 = fully dark, 1 = fully lit) for the
+// A single participant's on-ness (0 = fully dark, 1 = fully lit) for the
 // current moment in the wipe cycle described above, crossfading over
-// PAINTING_WIPE_BAND as the sweep edge passes each painting's position.
-function wipeLitFractions(polygons) {
-  const positions = paintingWipePositions(polygons);
+// PAINTING_WIPE_BAND as the sweep edge passes its own normalized position.
+function wipeFractionAtPosition(position) {
   const t = (millis() / 1000) % PAINTING_WIPE_PERIOD;
 
   if (t < PAINTING_WIPE_ON_DURATION) {
     const sweep = paintingWipeSweep(t, PAINTING_WIPE_ON_DURATION);
-    return positions.map((p) =>
-      constrain((sweep - p) / PAINTING_WIPE_BAND + 0.5, 0, 1),
-    );
+    return constrain((sweep - position) / PAINTING_WIPE_BAND + 0.5, 0, 1);
   }
-  if (t < PAINTING_WIPE_ON_DURATION + PAINTING_WIPE_HOLD_DURATION) {
-    return positions.map(() => 1);
-  }
+  if (t < PAINTING_WIPE_ON_DURATION + PAINTING_WIPE_HOLD_DURATION) return 1;
   if (
     t <
     PAINTING_WIPE_ON_DURATION +
@@ -427,11 +450,17 @@ function wipeLitFractions(polygons) {
   ) {
     const tOff = t - PAINTING_WIPE_ON_DURATION - PAINTING_WIPE_HOLD_DURATION;
     const sweep = paintingWipeSweep(tOff, PAINTING_WIPE_OFF_DURATION);
-    return positions.map(
-      (p) => 1 - constrain((sweep - p) / PAINTING_WIPE_BAND + 0.5, 0, 1),
-    );
+    return 1 - constrain((sweep - position) / PAINTING_WIPE_BAND + 0.5, 0, 1);
   }
-  return positions.map(() => 0);
+  return 0;
+}
+
+function wipeLitFraction(poly) {
+  return wipeFractionAtPosition(wipePosition(poly));
+}
+
+function wipeLitFractions(polygons) {
+  return polygons.map(wipeLitFraction);
 }
 
 function drawWipePaintings(pg, polygons) {
@@ -470,25 +499,23 @@ function drawPaintings(pg) {
 
   if (isSpotlightMode(stateValue)) {
     const litIndices = spotlightLitIndices(stateValue, polygons.length);
-    const onState = resolveLightState("glow");
+    const onState = resolveLightState("filled");
     const offState = resolveLightState("outline");
     polygons.forEach((poly, i) => {
       const on = litIndices.has(i);
-      if (on) drawGlow(pg, poly);
       drawLightShape(pg, poly, on ? onState : offState, { strokeWeight: 9 });
     });
     return;
   }
 
   if (stateValue === "curtain") return drawCurtainPaintings(pg, polygons);
+  if (stateValue === "random") return drawRandomPaintings(pg, polygons);
   if (stateValue === "wipe") return drawWipePaintings(pg, polygons);
   if (stateValue === "pulse") return drawPulsePaintings(pg, polygons);
 
   const resolved = resolveLightState(stateValue);
-  const lit = isLitState(resolved);
 
   polygons.forEach((poly) => {
-    if (lit && isGlowMode(stateValue)) drawGlow(pg, poly);
     drawLightShape(pg, poly, resolved, { strokeWeight: 9 });
   });
 }

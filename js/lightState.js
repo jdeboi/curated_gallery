@@ -142,21 +142,80 @@ function drawGlow(pg, poly) {
   }
 }
 
+// Shrinks poly inward by `dist` along each vertex's edge bisector - used so
+// a stroke drawn on the result (see drawLightShape below) lands entirely
+// inside poly's own boundary instead of straddling it (p5 always centers a
+// stroke on the path it's given). Standard mitered polygon offset: each
+// edge's inward normal is found from the polygon's overall winding (via
+// signed area), then each vertex moves along the averaged normal of its two
+// adjacent edges, scaled by 1/cos(half the corner angle) so both edges end
+// up offset by exactly `dist`. That scale blows up near a sharp/reflex
+// corner, so it's floored at 0.35 (capping the move at ~2.9x dist) rather
+// than left to spike arbitrarily - fine for the near-rectangular quads and
+// gently-curved silhouettes this runs on.
+function insetPolygon(poly, dist) {
+  const n = poly.length;
+  if (n < 3 || dist <= 0) return poly;
+
+  let area = 0;
+  for (let i = 0; i < n; i++) {
+    const a = poly[i],
+      b = poly[(i + 1) % n];
+    area += a.x * b.y - b.x * a.y;
+  }
+  const sign = area >= 0 ? 1 : -1;
+
+  const edgeNormals = poly.map((_, i) => {
+    const a = poly[i],
+      b = poly[(i + 1) % n];
+    const dx = b.x - a.x,
+      dy = b.y - a.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len,
+      uy = dy / len;
+    return sign >= 0 ? { x: -uy, y: ux } : { x: uy, y: -ux };
+  });
+
+  return poly.map((p, i) => {
+    const nPrev = edgeNormals[(i - 1 + n) % n];
+    const nCur = edgeNormals[i];
+    let bx = nPrev.x + nCur.x;
+    let by = nPrev.y + nCur.y;
+    const bLen = Math.hypot(bx, by);
+    if (bLen < 1e-6) {
+      return { x: p.x + nCur.x * dist, y: p.y + nCur.y * dist };
+    }
+    bx /= bLen;
+    by /= bLen;
+    const cosHalf = bx * nCur.x + by * nCur.y;
+    const miter = dist / Math.max(cosHalf, 0.35);
+    return { x: p.x + bx * miter, y: p.y + by * miter };
+  });
+}
+
 // Renders poly filled/outlined/off (or any crossfade between them) per
 // `resolved` - the one draw routine both butterflies and paintings render
-// through so they read as the same visual language.
+// through so they read as the same visual language. Fill (when present)
+// covers the full poly; stroke (when present) is drawn on an inset copy
+// (see insetPolygon above) so it sits inside poly's boundary rather than
+// straddling it.
 function drawLightShape(pg, poly, resolved, { strokeWeight = 3 } = {}) {
   pg.push();
-  if (resolved.fillAlpha > 0) pg.fill(resolved.fillColor, resolved.fillAlpha);
-  else pg.noFill();
+  if (resolved.fillAlpha > 0) {
+    pg.noStroke();
+    pg.fill(resolved.fillColor, resolved.fillAlpha);
+    pg.beginShape();
+    poly.forEach((p) => pg.vertex(p.x, p.y));
+    pg.endShape(CLOSE);
+  }
   if (resolved.strokeAlpha > 0) {
+    pg.noFill();
     pg.stroke(255, resolved.strokeAlpha);
     pg.strokeWeight(strokeWeight);
-  } else {
-    pg.noStroke();
+    const strokePoly = insetPolygon(poly, strokeWeight / 2);
+    pg.beginShape();
+    strokePoly.forEach((p) => pg.vertex(p.x, p.y));
+    pg.endShape(CLOSE);
   }
-  pg.beginShape();
-  poly.forEach((p) => pg.vertex(p.x, p.y));
-  pg.endShape(CLOSE);
   pg.pop();
 }

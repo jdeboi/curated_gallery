@@ -3,7 +3,7 @@
  * rules), ported from Dan Shiffman's "The Nature of Code" Ch. 6 flocking
  * sketch (https://www.youtube.com/watch?v=IoKfQrlQ7rA). Lives in the wall's
  * shared logical space (WALL_BOUNDS, see js/wall.js) like every other
- * scene, but - unlike snake.js/mycelium.js - doesn't steer around
+ * scene, but - unlike vines.js/mycelium.js - doesn't steer around
  * paintings/wing sculptures: birds just fly over them. Plain
  * separate/align/cohere plus a wall-edge turn-back was producing a
  * different failure mode than obstacle collisions - the flock coalescing
@@ -33,6 +33,22 @@ const BIRD_NEIGHBOR_DIST = 60;
 const BIRD_SEP_DIST = 30;
 const BIRD_EDGE_MARGIN = 50; // soft-steer back inward within this of a wall edge
 const BIRD_EDGE_FORCE = 0.15; // stronger than flocking so an edge always wins
+
+// nightBirds' painting boxes are small enough, and their whole point is
+// visible confinement, that BIRD_EDGE_FORCE's gentle wall-edge nudge reads
+// as birds loitering right at (or briefly clamped past) a painting's
+// silhouette rather than staying inside it. Confined boids (this.bounds
+// set, see initNightBirds) get a harder, penetration-scaled push instead -
+// see keepInBounds().
+const BIRD_EDGE_FORCE_CONFINED = 0.6;
+const BIRD_EDGE_MARGIN_FRAC_CONFINED = 0.35; // fraction of the painting's own w/h
+
+// "nightBirds" (see js/scenes.js) confines the flock to inside each
+// painting's own bounds instead of letting it roam the whole wall - one
+// small sub-flock per painting, sized by that painting's area so the
+// biggest paintings read as more alive than the smallest ones.
+const NIGHTBIRDS_MIN_PER_PAINTING = 2;
+const NIGHTBIRDS_MAX_PER_PAINTING = 10;
 
 // Flip to false to go back to the plain triangle silhouette (renderBoidTriangle
 // below, unchanged) instead of assets/bird_sprite.png - kept side by side
@@ -98,6 +114,14 @@ class Boid {
 
     for (const other of others) {
       if (other === this) continue;
+      // nightBirds gives every boid a paintingIndex (see initNightBirds) so
+      // each painting's handful of birds flocks only among itself, rather
+      // than birds in one painting reacting to birds confined to another.
+      if (
+        this.paintingIndex !== undefined &&
+        other.paintingIndex !== this.paintingIndex
+      )
+        continue;
       const dx = this.x - other.x;
       const dy = this.y - other.y;
       const d = Math.hypot(dx, dy);
@@ -170,21 +194,42 @@ class Boid {
   }
 
   keepInBounds() {
+    // this.bounds (set by initNightBirds) confines this boid to one
+    // painting's box instead of the whole wall - margin shrinks to fit
+    // paintings smaller than a normal BIRD_EDGE_MARGIN would allow.
+    const confined = !!this.bounds;
+    const b = this.bounds || { x: 0, y: 0, w: WALL_BOUNDS.w, h: WALL_BOUNDS.h };
+    const margin = confined
+      ? Math.min(b.w, b.h) * BIRD_EDGE_MARGIN_FRAC_CONFINED
+      : BIRD_EDGE_MARGIN;
+
     let desiredX = null;
     let desiredY = null;
-    if (this.x < BIRD_EDGE_MARGIN) desiredX = BIRD_MAX_SPEED;
-    else if (this.x > WALL_BOUNDS.w - BIRD_EDGE_MARGIN)
+    let penetration = 0; // how far past the margin the worst axis is, 0..margin
+    if (this.x < b.x + margin) {
+      desiredX = BIRD_MAX_SPEED;
+      penetration = Math.max(penetration, b.x + margin - this.x);
+    } else if (this.x > b.x + b.w - margin) {
       desiredX = -BIRD_MAX_SPEED;
-    if (this.y < BIRD_EDGE_MARGIN) desiredY = BIRD_MAX_SPEED;
-    else if (this.y > WALL_BOUNDS.h - BIRD_EDGE_MARGIN)
+      penetration = Math.max(penetration, this.x - (b.x + b.w - margin));
+    }
+    if (this.y < b.y + margin) {
+      desiredY = BIRD_MAX_SPEED;
+      penetration = Math.max(penetration, b.y + margin - this.y);
+    } else if (this.y > b.y + b.h - margin) {
       desiredY = -BIRD_MAX_SPEED;
+      penetration = Math.max(penetration, this.y - (b.y + b.h - margin));
+    }
 
     if (desiredX !== null || desiredY !== null) {
-      this.steerToward(
-        desiredX ?? this.vx,
-        desiredY ?? this.vy,
-        BIRD_EDGE_FORCE,
-      );
+      // Confined boids ramp from BIRD_EDGE_FORCE_CONFINED up to 3x that as
+      // they push deeper past the margin, instead of one flat force a
+      // determined flocking pull could keep matching all the way to the
+      // hard clamp in update().
+      const force = confined
+        ? map(penetration, 0, margin, BIRD_EDGE_FORCE_CONFINED, BIRD_EDGE_FORCE_CONFINED * 3, true)
+        : BIRD_EDGE_FORCE;
+      this.steerToward(desiredX ?? this.vx, desiredY ?? this.vy, force);
     }
   }
 
@@ -226,10 +271,12 @@ class Boid {
     this.ay = 0;
 
     // Safety clamp: the steering above turns a boid back inward well
-    // before it reaches an edge, but never lets it actually leave
-    // WALL_BOUNDS outright the way the soft steer alone could.
-    this.x = constrain(this.x, 0, WALL_BOUNDS.w);
-    this.y = constrain(this.y, 0, WALL_BOUNDS.h);
+    // before it reaches an edge, but never lets it actually leave its
+    // bounds (WALL_BOUNDS, or one painting's box under nightBirds - see
+    // keepInBounds()) outright the way the soft steer alone could.
+    const b = this.bounds || { x: 0, y: 0, w: WALL_BOUNDS.w, h: WALL_BOUNDS.h };
+    this.x = constrain(this.x, b.x, b.x + b.w);
+    this.y = constrain(this.y, b.y, b.y + b.h);
   }
 }
 
@@ -246,6 +293,35 @@ function initBirds() {
   for (let i = 0; i < BIRD_COUNT; i++) {
     boids.push(new Boid(random(WALL_BOUNDS.w), random(WALL_BOUNDS.h)));
   }
+}
+
+// nightBirds' own init (js/scenes.js) - one small flock per painting,
+// confined to that painting's axis-aligned box (getPaintingBounds(), js/
+// paintings.js) rather than spread across the whole wall. Bird count per
+// painting scales linearly with that painting's area between the two
+// NIGHTBIRDS_*_PER_PAINTING constants, so the smallest painting on the wall
+// gets the minimum and the largest gets the maximum.
+function initNightBirds() {
+  boids = [];
+  const bounds = getPaintingBounds();
+  if (bounds.length === 0) return;
+
+  const areas = bounds.map((b) => b.w * b.h);
+  const minArea = Math.min(...areas);
+  const maxArea = Math.max(...areas);
+
+  bounds.forEach((b, i) => {
+    const t = maxArea > minArea ? (areas[i] - minArea) / (maxArea - minArea) : 1;
+    const count = Math.round(
+      lerp(NIGHTBIRDS_MIN_PER_PAINTING, NIGHTBIRDS_MAX_PER_PAINTING, t),
+    );
+    for (let j = 0; j < count; j++) {
+      const boid = new Boid(b.x + random(b.w), b.y + random(b.h));
+      boid.bounds = b;
+      boid.paintingIndex = i;
+      boids.push(boid);
+    }
+  });
 }
 
 function updateBirds() {

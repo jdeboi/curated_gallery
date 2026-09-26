@@ -120,7 +120,14 @@ function drawCalibrationOutline(pg, localPoints) {
 // cycles a manual override on top of that, for previewing a look without
 // needing to sit through a specific scene - "auto" (the default) defers
 // back to whatever the current scene declares.
-const BUTTERFLY_LIGHT_OVERRIDES = ["auto", "filled", "glow", "outline", "off"];
+const BUTTERFLY_LIGHT_OVERRIDES = [
+  "auto",
+  "filled",
+  "glow",
+  "outline",
+  "off",
+  "wipe",
+];
 let butterflyLightOverride = "auto";
 
 function cycleButterflyLightMode() {
@@ -139,6 +146,14 @@ function currentButterflyState() {
 // outlined, off, or crossfading/switching between them, per
 // currentButterflyState() above. Calibration mode overrides this with the
 // plain still trace instead, same as before.
+//
+// "wipe" is the one exception: rather than a single resolved state applied
+// to every sculpture alike, it joins js/paintings.js's per-painting "wipe"
+// sweep - each sculpture crossfades in/out as the sweep edge passes its own
+// position (wipeLitFraction()), sharing the paintings' own sweep basis
+// whenever paintingState is *also* "wipe" (see wipeBasisPolygons()) so both
+// groups read as one continuous wave rather than two separately-normalized
+// ones.
 function drawButterflyLightState(pg, index, refMap) {
   const localPoints = outlineLocalPoints(index, refMap);
   if (!localPoints) return;
@@ -149,6 +164,15 @@ function drawButterflyLightState(pg, index, refMap) {
   }
 
   const stateValue = currentButterflyState();
+  if (stateValue === "wipe") {
+    const fraction = wipeLitFraction(localPoints);
+    const onKeyframe = lightStateKeyframe("filled");
+    const offKeyframe = lightStateKeyframe("off");
+    const resolved = crossfadeKeyframes(offKeyframe, onKeyframe, fraction);
+    drawLightShape(pg, localPoints, resolved, { strokeWeight: 9 });
+    return;
+  }
+
   const resolved = resolveLightState(stateValue);
   if (isLitState(resolved) && isGlowMode(stateValue)) drawGlow(pg, localPoints);
   drawLightShape(pg, localPoints, resolved, { strokeWeight: 9 });
@@ -311,9 +335,9 @@ function drawSpinnerOutlines(pg) {
 
 // Same cache-per-frame pattern as getPaintingPolygons() (js/paintings.js),
 // for the same reason: this is the outline-avoidance counterpart paintings
-// already had, so particles/snake/mycelium can bounce off a wing sculpture
+// already had, so particles/vines/mycelium can bounce off a wing sculpture
 // the same way they bounce off a painting, and each of those calls
-// snakeObstacles()/myceliumObstacles()/updateParticles() once per frame.
+// vineObstacles()/myceliumObstacles()/updateParticles() once per frame.
 // Skips any outline whose SVG hasn't finished loading yet (or, on a wall
 // with no OUTLINE_SPECS at all, returns an empty list) via
 // outlineLocalPoints()'s own null check.

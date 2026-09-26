@@ -10,6 +10,21 @@
  * same SCENES durations, same wall-clock second -> same scene index and
  * the same elapsed-in-scene offset.
  *
+ * The order scenes play in within each full pass is shuffled rather than
+ * SCENES' own declared order - see shuffledSceneOrder()/orderForLoop()
+ * below - but the shuffle is seeded from the loop number (elapsed time /
+ * SHOW_TOTAL_DURATION), not Math.random(), so it's the same deterministic
+ * function of wall-clock time as everything else here: two unlinked
+ * instances still land on the same scene at the same moment, they just
+ * don't see "black, mycelium, emanate, ..." in the same order every lap.
+ * A scene's `duration` is optional - omit it and it falls back to
+ * DEFAULT_SCENE_DURATION (see sceneDuration()).
+ *
+ * Manual scene changes (arrow keys, see nextScene()/previousScene() below)
+ * intentionally step through SCENES in its own plain declared order, not
+ * the shuffled one - that's what makes them useful for calibration, going
+ * scene-by-scene in a predictable sequence rather than a random one.
+ *
  * This syncs *timing* only - which scene, and how far into its
  * duration - not the generative content itself. Each scene's own
  * random growth/particle motion still runs its own independent
@@ -53,16 +68,18 @@
  * outlines' own steady state (drawShowOverlay(), called from
  * js/wall.js's displayWall()), for an effect that needs to sit visibly on
  * top of their opaque fill rather than underneath it, the way `draw` does.
- * "spinner"'s cycling rings and "searchlight"'s beam-highlighted painting
- * both need this: they trace/relight the painting's own silhouette, which a
- * plain `draw` would have already been painted over by the time
- * drawPaintings() ran.
+ * "spinner"'s cycling rings need this: they trace the painting's own
+ * silhouette, which a plain `draw` would have already been painted over by
+ * the time drawPaintings() ran.
  *
  * Paintings (js/paintings.js) and wing sculptures (js/outlines.js) are
  * drawn on top of every scene from js/wall.js's displayWall(), not listed
  * here - each reads its own current butterflyState/paintingState off
  * currentScene() every frame rather than being scenes themselves.
  */
+
+// Fallback for any scene entry that omits `duration` - see sceneDuration().
+const DEFAULT_SCENE_DURATION = 20000;
 
 const SCENES = [
   {
@@ -109,11 +126,18 @@ const SCENES = [
     draw: drawParticles,
   },
   {
-    name: "snake",
+    name: "vines",
     duration: 35000,
-    init: initSnake,
-    update: updateSnake,
-    draw: drawSnake,
+    init: initVines,
+    update: updateVines,
+    draw: drawVines,
+  },
+  {
+    name: "fronds",
+    duration: 35000,
+    init: initFronds,
+    update: updateFronds,
+    draw: drawFronds,
   },
   {
     name: "birds",
@@ -132,16 +156,16 @@ const SCENES = [
   {
     name: "nightBirds",
     duration: 35000,
-    init: initBirds, // js/birds.js - same boid flock as "birds"
+    init: initNightBirds, // js/birds.js - one confined sub-flock per painting
     update: updateBirds,
     draw: (pg) => pg.background(0),
     // drawBirds runs from `overlay` (drawn after drawPaintings(), see
     // js/wall.js's displayWall()) instead of `draw` here, so the flock
     // stays visible sweeping across the lit paintings themselves rather
-    // than disappearing behind their opaque fill - same reason
-    // "spinner"/"searchlight" below use overlay for their own content.
+    // than disappearing behind their opaque fill - same reason "spinner"
+    // below uses overlay for its own content.
     overlay: drawBirds,
-    paintingState: "filled",
+    paintingState: "outline",
   },
   {
     name: "reactionDiffusion",
@@ -151,11 +175,11 @@ const SCENES = [
     draw: drawReactionDiffusion, // js/reactionDiffusion.js - shader-based
   },
   {
-    name: "circleWobble",
-    duration: 40000,
-    init: initCircleWobble,
-    update: updateCircleWobble,
-    draw: drawCircleWobble, // js/circleWobble.js - shader-based
+    name: "stars",
+    duration: 35000,
+    init: initStars,
+    update: updateStars,
+    draw: drawStars, // js/stars.js
   },
   // The following are painting-choreography scenes: a plain black field so
   // each painting mode (js/paintings.js) reads clearly on its own, rather
@@ -175,6 +199,11 @@ const SCENES = [
     update: () => {},
     draw: (pg) => pg.background(0),
     paintingState: "wipe",
+    // Wing sculptures join the same sweep as the paintings (see
+    // js/paintings.js's wipeBasisPolygons()) rather than sitting there
+    // steadily lit while it plays - a no-op on walls with no OUTLINE_SPECS
+    // (e.g. the right wall).
+    butterflyState: "wipe",
   },
   {
     name: "column",
@@ -210,29 +239,19 @@ const SCENES = [
     paintingState: "off",
     butterflyState: "off",
   },
-  {
-    name: "searchlight",
-    duration: 45000,
-    init: () => {},
-    update: () => {},
-    draw: (pg) => pg.background(0),
-    // The beam itself has to be drawn here, alongside the highlight, rather
-    // than in `draw` - `draw` runs before drawPaintings() paints each
-    // painting's opaque "off" (black) fill on top (see js/wall.js's
-    // displayWall()), which hid the beam behind every painting it swept
-    // near or paused on instead of lighting them up. See js/searchlight.js.
-    overlay: (pg) => {
-      drawSearchlights(pg);
-      drawSearchlightHighlights(pg);
-    },
-    paintingState: "off",
-  },
   // One entry per file in js/video.js's VIDEO_FILES - see that file for
   // why these are generated instead of listed by hand here.
   ...buildVideoScenes(),
 ];
 
-const SHOW_TOTAL_DURATION = SCENES.reduce((sum, s) => sum + s.duration, 0);
+// A scene's `duration` is optional - this is the one place that matters,
+// so every other reader goes through here rather than touching
+// scene.duration directly.
+function sceneDuration(scene) {
+  return scene.duration || DEFAULT_SCENE_DURATION;
+}
+
+const SHOW_TOTAL_DURATION = SCENES.reduce((sum, s) => sum + sceneDuration(s), 0);
 
 let sceneIndex = 0;
 let showPlaying = true;
@@ -242,18 +261,63 @@ function currentScene() {
   return SCENES[sceneIndex];
 }
 
+// Small deterministic PRNG (mulberry32), seeded from the loop number rather
+// than Math.random() - see shuffledSceneOrder()/orderForLoop() below for why
+// the "random" show order still has to be a pure function of wall-clock
+// time rather than actually random per process.
+function mulberry32(seed) {
+  let state = seed | 0;
+  return function () {
+    state = (state + 0x6d2b79f5) | 0;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// A Fisher-Yates shuffle of SCENES' indices, seeded so the same loop number
+// always produces the same order - see orderForLoop().
+function shuffledSceneOrder(seed) {
+  const rand = mulberry32(seed);
+  const order = SCENES.map((_, i) => i);
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  return order;
+}
+
+// Caches the shuffle for the current loop so computeShowPosition() (called
+// every frame) isn't re-shuffling on every call - only recomputed when the
+// loop number actually advances.
+let cachedLoopIndex = null;
+let cachedOrder = null;
+function orderForLoop(loopIndex) {
+  if (loopIndex !== cachedLoopIndex) {
+    cachedLoopIndex = loopIndex;
+    cachedOrder = shuffledSceneOrder(loopIndex);
+  }
+  return cachedOrder;
+}
+
 // Maps a moment in wall-clock time to a scene index + how far into that
 // scene's duration it falls - the one piece of math every instance needs
-// to agree on for the show to stay in step without a network link.
+// to agree on for the show to stay in step without a network link. Which
+// scene that is comes from orderForLoop() rather than SCENES' own order,
+// so consecutive loops play scenes in a different (but still synced)
+// sequence - see the file header note on this.
 function computeShowPosition(nowMs) {
+  const loopIndex = Math.floor(nowMs / SHOW_TOTAL_DURATION);
+  const order = orderForLoop(loopIndex);
   let t = nowMs % SHOW_TOTAL_DURATION;
-  for (let i = 0; i < SCENES.length; i++) {
-    if (t < SCENES[i].duration) return { sceneIndex: i, elapsedInScene: t };
-    t -= SCENES[i].duration;
+  for (let i = 0; i < order.length; i++) {
+    const dur = sceneDuration(SCENES[order[i]]);
+    if (t < dur) return { sceneIndex: order[i], elapsedInScene: t };
+    t -= dur;
   }
   // Floating-point edge case at the exact wraparound instant.
-  const last = SCENES.length - 1;
-  return { sceneIndex: last, elapsedInScene: SCENES[last].duration - 1 };
+  const lastIndex = order[order.length - 1];
+  return { sceneIndex: lastIndex, elapsedInScene: sceneDuration(SCENES[lastIndex]) - 1 };
 }
 
 function enterScene(index) {
@@ -313,7 +377,7 @@ function drawShowOverlay(pg) {
 function sceneStatusLine() {
   const scene = currentScene();
   const status = showPlaying
-    ? `${Math.max(0, Math.ceil((scene.duration - lastElapsedInScene) / 1000))}s`
+    ? `${Math.max(0, Math.ceil((sceneDuration(scene) - lastElapsedInScene) / 1000))}s`
     : "manual";
   return `scene ${sceneIndex + 1}/${SCENES.length}: ${scene.name} (${status})`;
 }

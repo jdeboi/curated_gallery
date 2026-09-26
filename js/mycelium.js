@@ -3,18 +3,26 @@
  *
  * Branches grow in the wall's shared logical drawing space (WALL_BOUNDS,
  * see js/wall.js) - the same space paintings.js/outlines.js express
- * painting and wing-sculpture geometry in - bouncing back inward at the
- * wall edges, and steering away from those polygons (inflated slightly via
+ * painting and wing-sculpture geometry in - wrapping around the wall
+ * edges (Pac-Man / Asteroids style) rather than dying or bouncing there,
+ * and steering away from those polygons (inflated slightly via
  * polygonCentroid, same trick drawGlow uses) so hyphae wrap around
  * frames/sculptures rather than crossing them. On a multi-panel wall this
  * space spans every
  * panel, so a branch can grow right across the seam from one physical
- * panel into the next. Each branch is rendered as a single tapered
- * ribbon polygon (thick at the root, thinning toward the tip), filled
- * solid opaque white so it reads clearly against the dark wall.
+ * panel into the next. Each branch is rendered as one or more tapered
+ * ribbon polygons (thick at the root, thinning toward the tip) - a new
+ * ribbon segment starts every time the branch wraps an edge, since a
+ * single polygon can't jump from one side of the wall to the other
+ * without drawing a line straight across it - filled solid opaque white
+ * so it reads clearly against the dark wall.
  *
  * Growth is frame-gated (see MYCELIUM_FRAME_INTERVAL) rather than
  * stepping every frame, so the spread is slow enough to actually watch.
+ * The whole network also restarts itself from empty every
+ * MYCELIUM_RESTART_INTERVAL (see below), independent of the scene
+ * scheduler in js/scenes.js, so a long mycelium scene doesn't end up
+ * static and fully clogged with branches for its last stretch.
  */
 
 const MYCELIUM_STEP = 2.2;
@@ -24,13 +32,18 @@ const MYCELIUM_MAX_BRANCHES = 50;
 const MYCELIUM_MAX_GENERATION = 3;
 const MYCELIUM_OBSTACLE_SCALE = 1.15; // inflate painting polygons when steering
 const MYCELIUM_AVOID_PAINTINGS = false;
+const MYCELIUM_RESTART_INTERVAL = 25000; // ms of growth before the network resets
 
 let myceliumBranches = [];
 let myceliumRootTimer = 0;
+let myceliumStartTime = 0;
 
 class MyceliumBranch {
   constructor(x, y, angle, thickness, generation) {
-    this.points = [{ x, y }];
+    // A branch is a list of segments (each a list of points), rather than
+    // one flat point list, because wrapping around a wall edge has to
+    // start a fresh segment - see the file header note.
+    this.segments = [[{ x, y }]];
     this.angle = angle;
     this.thickness = thickness;
     this.generation = generation;
@@ -40,23 +53,16 @@ class MyceliumBranch {
     this.forkCooldown = random(30, 70);
   }
 
+  get points() {
+    return this.segments[this.segments.length - 1];
+  }
+
   step(obstacles) {
     if (!this.alive) return;
 
     const tip = this.points[this.points.length - 1];
     let angle = this.angle + random(-0.18, 0.18);
-
-    // Bounce back inward off the wall edges instead of dying there, so
-    // growth keeps spreading across the whole surface.
     let next = myceliumNextPoint(tip, angle);
-    if (next.x < 6 || next.x > WALL_BOUNDS.w - 6) {
-      angle = PI - angle;
-      next = myceliumNextPoint(tip, angle);
-    }
-    if (next.y < 6 || next.y > WALL_BOUNDS.h - 6) {
-      angle = -angle;
-      next = myceliumNextPoint(tip, angle);
-    }
 
     if (myceliumBlocked(next, obstacles)) {
       let found = false;
@@ -64,10 +70,7 @@ class MyceliumBranch {
         for (const sign of [1, -1]) {
           const testAngle = angle + sign * da;
           const testPoint = myceliumNextPoint(tip, testAngle);
-          if (
-            myceliumInBounds(testPoint) &&
-            !myceliumBlocked(testPoint, obstacles)
-          ) {
+          if (!myceliumBlocked(testPoint, obstacles)) {
             angle = testAngle;
             next = testPoint;
             found = true;
@@ -83,8 +86,26 @@ class MyceliumBranch {
     }
     this.stuckSteps = 0;
 
+    // Wrap around the wall edges instead of bouncing back inward: a branch
+    // that grows off one side reappears on the opposite side, continuing
+    // in the same direction. Start a new segment on wrap so the ribbon
+    // doesn't get drawn as one polygon stretching across the whole wall.
+    let wrapped = false;
+    if (next.x < 0 || next.x > WALL_BOUNDS.w) {
+      next.x = ((next.x % WALL_BOUNDS.w) + WALL_BOUNDS.w) % WALL_BOUNDS.w;
+      wrapped = true;
+    }
+    if (next.y < 0 || next.y > WALL_BOUNDS.h) {
+      next.y = ((next.y % WALL_BOUNDS.h) + WALL_BOUNDS.h) % WALL_BOUNDS.h;
+      wrapped = true;
+    }
+
     this.angle = angle;
-    this.points.push(next);
+    if (wrapped) {
+      this.segments.push([next]);
+    } else {
+      this.points.push(next);
+    }
     this.length += MYCELIUM_STEP;
 
     if (this.length >= this.maxLength) {
@@ -121,15 +142,6 @@ function myceliumNextPoint(p, angle) {
     x: p.x + Math.cos(angle) * MYCELIUM_STEP,
     y: p.y + Math.sin(angle) * MYCELIUM_STEP,
   };
-}
-
-function myceliumInBounds(p) {
-  return (
-    p.x >= 6 &&
-    p.x <= WALL_BOUNDS.w - 6 &&
-    p.y >= 6 &&
-    p.y <= WALL_BOUNDS.h - 6
-  );
 }
 
 function myceliumBlocked(p, obstacles) {
@@ -173,10 +185,19 @@ function myceliumSpawnRoot() {
 function initMycelium() {
   myceliumBranches = [];
   myceliumRootTimer = 0;
+  myceliumStartTime = millis();
   for (let i = 0; i < 5; i++) myceliumSpawnRoot();
 }
 
 function updateMycelium() {
+  // Restart the whole network from empty on a timer, independent of how
+  // long the scene scheduler keeps this scene on screen, so a long run
+  // doesn't end with the wall fully clogged and static.
+  if (millis() - myceliumStartTime > MYCELIUM_RESTART_INTERVAL) {
+    initMycelium();
+    return;
+  }
+
   if (frameCount % MYCELIUM_FRAME_INTERVAL === 0) {
     const obstacles = MYCELIUM_AVOID_PAINTINGS ? myceliumObstacles() : [];
     myceliumBranches.forEach((b) => b.step(obstacles));
@@ -192,18 +213,17 @@ function updateMycelium() {
   }
 }
 
-function myceliumRibbonSides(branch) {
-  const pts = branch.points;
-  const n = pts.length;
-  const rootW = branch.thickness;
-  const tipW = Math.max(1.5, branch.thickness * 0.45);
+function myceliumRibbonSides(points, thickness) {
+  const n = points.length;
+  const rootW = thickness;
+  const tipW = Math.max(1.5, thickness * 0.45);
 
   const left = [];
   const right = [];
   for (let i = 0; i < n; i++) {
-    const p = pts[i];
-    const prev = pts[Math.max(0, i - 1)];
-    const next = pts[Math.min(n - 1, i + 1)];
+    const p = points[i];
+    const prev = points[Math.max(0, i - 1)];
+    const next = points[Math.min(n - 1, i + 1)];
     const dx = next.x - prev.x;
     const dy = next.y - prev.y;
     const len = Math.hypot(dx, dy) || 1;
@@ -218,19 +238,21 @@ function myceliumRibbonSides(branch) {
 }
 
 function drawMyceliumBranch(pg, branch) {
-  if (branch.points.length < 2) return;
+  branch.segments.forEach((segment) => {
+    if (segment.length < 2) return;
 
-  const { left, right } = myceliumRibbonSides(branch);
+    const { left, right } = myceliumRibbonSides(segment, branch.thickness);
 
-  pg.push();
-  pg.stroke(255);
-  pg.strokeWeight(1.5);
-  pg.fill(255);
-  pg.beginShape();
-  left.forEach((p) => pg.vertex(p.x, p.y));
-  for (let i = right.length - 1; i >= 0; i--) pg.vertex(right[i].x, right[i].y);
-  pg.endShape(CLOSE);
-  pg.pop();
+    pg.push();
+    pg.stroke(255);
+    pg.strokeWeight(1.5);
+    pg.fill(255);
+    pg.beginShape();
+    left.forEach((p) => pg.vertex(p.x, p.y));
+    for (let i = right.length - 1; i >= 0; i--) pg.vertex(right[i].x, right[i].y);
+    pg.endShape(CLOSE);
+    pg.pop();
+  });
 
   // Bulbous tip nodule where the hypha is actively growing.
   if (branch.alive) {

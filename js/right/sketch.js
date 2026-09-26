@@ -118,6 +118,7 @@ function setup() {
   loadBackgroundVideos(); // js/video.js - one <video> element per VIDEO_FILES entry
   loadBirdSprite(); // js/birds.js
   loadButterflySprite(); // js/butterflies.js
+  loadStarFlowerSprite(); // js/stars.js
 
   pMapper = createProjectionMapper(this);
 
