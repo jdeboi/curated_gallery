@@ -173,6 +173,7 @@ const PAINTING_LIGHT_OVERRIDES = [
   "wipe",
   "wipeDown",
   "wipeRadial",
+  "dotField",
   "pulse",
   "groupPulse",
   "lookin",
@@ -736,6 +737,8 @@ function drawPaintings(pg) {
   if (stateValue === "wipe") return drawWipePaintings(pg, polygons);
   if (stateValue === "wipeDown") return drawWipeDownPaintings(pg, polygons);
   if (stateValue === "wipeRadial") return drawWipeRadialPaintings(pg, polygons);
+  if (stateValue === "dotField") // js/dotField.js - lit by nearness to its hidden balls
+    return drawPaintingsWithFractions(pg, polygons, polygons.map(dotFieldLitFraction));
   if (stateValue === "pulse") return drawPulsePaintings(pg, polygons);
   if (stateValue === "groupPulse") return drawGroupPulsePaintings(pg, polygons);
   if (stateValue === "lookin") return drawLookinPaintings(pg, polygons); // js/lookin.js

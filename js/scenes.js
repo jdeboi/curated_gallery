@@ -231,6 +231,16 @@ const SCENES = [
     paintingState: "curtainVertical",
   },
   {
+    name: "dotField",
+    duration: 35000,
+    init: initDotField,
+    update: updateDotField,
+    draw: drawDotField, // js/dotField.js - grid dots sized by distance to hidden gliding balls
+    // Paintings and wing sculptures brighten as the same hidden balls pass near them.
+    paintingState: "dotField",
+    butterflyState: "dotField",
+  },
+  {
     name: "jasmine",
     duration: 35000,
     init: initJasmine,

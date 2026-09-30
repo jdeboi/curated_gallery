@@ -130,6 +130,7 @@ const BUTTERFLY_LIGHT_OVERRIDES = [
   "wipe",
   "wipeDown",
   "wipeRadial",
+  "dotField",
   "groupPulse",
 ];
 let butterflyLightOverride = "auto";
@@ -197,6 +198,16 @@ function drawButterflyLightState(pg, index, refMap) {
   // joining js/paintings.js's "wipeRadial" basis (wipeRadialBasisPolygons()).
   if (stateValue === "wipeRadial") {
     const fraction = wipeRadialLitFraction(localPoints);
+    const onKeyframe = lightStateKeyframe("filled");
+    const offKeyframe = lightStateKeyframe("off");
+    const resolved = crossfadeKeyframes(offKeyframe, onKeyframe, fraction);
+    drawLightShape(pg, localPoints, resolved, { strokeWeight: 9 });
+    return;
+  }
+  // "dotField": lit by nearness to js/dotField.js's hidden gliding balls,
+  // same falloff paintings use in that mode.
+  if (stateValue === "dotField") {
+    const fraction = dotFieldLitFraction(localPoints);
     const onKeyframe = lightStateKeyframe("filled");
     const offKeyframe = lightStateKeyframe("off");
     const resolved = crossfadeKeyframes(offKeyframe, onKeyframe, fraction);
