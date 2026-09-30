@@ -131,6 +131,7 @@ const BUTTERFLY_LIGHT_OVERRIDES = [
   "wipeDown",
   "wipeRadial",
   "dotField",
+  "spotlight",
   "groupPulse",
 ];
 let butterflyLightOverride = "auto";
@@ -206,8 +207,11 @@ function drawButterflyLightState(pg, index, refMap) {
   }
   // "dotField": lit by nearness to js/dotField.js's hidden gliding balls,
   // same falloff paintings use in that mode.
-  if (stateValue === "dotField") {
-    const fraction = dotFieldLitFraction(localPoints);
+  // "spotlight": lit where js/spotlight.js's lights hit, same falloff
+  // paintings use in that mode.
+  if (stateValue === "dotField" || stateValue === "spotlight") {
+    const fraction =
+      stateValue === "dotField" ? dotFieldLitFraction(localPoints) : spotlightLitFraction(localPoints);
     const onKeyframe = lightStateKeyframe("filled");
     const offKeyframe = lightStateKeyframe("off");
     const resolved = crossfadeKeyframes(offKeyframe, onKeyframe, fraction);

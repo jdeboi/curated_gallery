@@ -250,6 +250,16 @@ const SCENES = [
     butterflyState: "dotField",
   },
   {
+    name: "spotlight",
+    duration: 35000,
+    init: initSpotlight,
+    update: updateSpotlight,
+    draw: drawSpotlight, // js/spotlight.js - two soft two-ring spotlights zig-zagging with fading trails
+    // Paintings and wing sculptures light up where the spotlights hit them.
+    paintingState: "spotlight",
+    butterflyState: "spotlight",
+  },
+  {
     name: "jasmine",
     duration: 35000,
     init: initJasmine,
