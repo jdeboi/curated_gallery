@@ -230,6 +230,15 @@ const SCENES = [
     // Opposite of "stars"' own curtain direction (horizontal) below.
     paintingState: "curtainVertical",
   },
+  {
+    name: "jasmine",
+    duration: 35000,
+    init: initJasmine,
+    update: updateJasmine,
+    draw: drawJasmine, // js/jasmine.js - radial size pulse from the wall center
+    // Radial sweep outward from the same wall center the flowers pulse from.
+    paintingState: "wipeRadial",
+  },
   // Painting-choreography scene: a plain black field so its painting mode
   // (js/paintings.js) reads clearly on its own, rather than competing with a
   // generative background.

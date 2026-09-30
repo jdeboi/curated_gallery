@@ -119,6 +119,7 @@ function setup() {
   loadBirdSprite(); // js/birds.js
   loadButterflySprite(); // js/butterflies.js
   loadStarFlowerSprite(); // js/stars.js
+  loadJasmineSprites(); // js/jasmine.js
 
   // create mapper object
   pMapper = createProjectionMapper(this);

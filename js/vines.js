@@ -64,6 +64,17 @@ const VINE_LEAF_MAX_LEN = 15; // fully grown, further back along the trail
 const VINE_LEAF_GROW_POINTS = 14; // trail points behind the head it takes a leaf to reach full size
 const VINE_LEAF_HALF_WIDTH_FRAC = 0.22; // leaf half-width as a fraction of its length
 
+// Little jasmine blossoms (js/jasmine.js's sprites) dotted along the trail.
+// Which trail points bloom, and each blossom's sprite/rotation, come from
+// paintingHash() (js/paintings.js) keyed on the vine's own per-life seed +
+// the point's index - stable frame to frame with no stored per-blossom
+// state, since a point's index never changes (see this file's header).
+const VINE_RENDER_JASMINE = false;
+const VINE_JASMINE_SPACING = 4; // trail points between candidate blossom spots
+const VINE_JASMINE_CHANCE = 0.35; // fraction of candidate spots that actually bloom
+const VINE_JASMINE_MAX_SIZE = 64; // blossom height once fully open
+const VINE_JASMINE_GROW_POINTS = 30; // trail points behind the head it takes a blossom to fully open
+
 let vines = [];
 
 function vineObstacles() {
@@ -133,7 +144,7 @@ function vineSpawnPoint(obstacles, existingStarts) {
 function makeVine(obstacles, existingStarts) {
   const { x, y } = vineSpawnPoint(obstacles, existingStarts);
   existingStarts.push({ x, y });
-  return { head: { x, y, angle: random(TWO_PI) }, trail: [{ x, y }] };
+  return { head: { x, y, angle: random(TWO_PI) }, trail: [{ x, y }], seed: random(1000) };
 }
 
 // Resets a vine back to a single fresh point elsewhere on the wall - see
@@ -145,6 +156,7 @@ function respawnVine(vine, obstacles, existingStarts) {
   vine.head.y = y;
   vine.head.angle = random(TWO_PI);
   vine.trail = [{ x, y }];
+  vine.seed = random(1000); // fresh blossom layout for the new life
 }
 
 function initVines() {
@@ -325,6 +337,31 @@ function addVineLeaves(pg, trail) {
   }
 }
 
+// One image() call per blossom, so unlike the stems/leaves these can't be
+// batched into a single shape call - kept sparse (VINE_JASMINE_SPACING /
+// VINE_JASMINE_CHANCE) for that reason. Blossoms open up behind the head
+// over VINE_JASMINE_GROW_POINTS, a slower ramp than the leaves', so the
+// freshest growth reads as leafy tip with flowers following behind.
+function drawVineJasmine(pg, vine, trail) {
+  const n = trail.length;
+  pg.imageMode(CENTER);
+  for (let i = VINE_JASMINE_SPACING; i < n; i += VINE_JASMINE_SPACING) {
+    if (paintingHash(i, vine.seed) > VINE_JASMINE_CHANCE) continue;
+    const img = jasmineImgs[Math.floor(paintingHash(i, vine.seed + 1) * jasmineImgs.length)];
+    if (!img || img.width === 0) continue; // still loading
+
+    const growFrac = constrain((n - 1 - i) / VINE_JASMINE_GROW_POINTS, 0, 1);
+    const h = VINE_JASMINE_MAX_SIZE * growFrac * (0.7 + 0.3 * paintingHash(i, vine.seed + 3));
+    if (h < 1) continue;
+
+    pg.push();
+    pg.translate(trail[i].x, trail[i].y);
+    pg.rotate(paintingHash(i, vine.seed + 2) * TWO_PI);
+    pg.image(img, 0, 0, h * (img.width / img.height), h);
+    pg.pop();
+  }
+}
+
 function drawVines(pg) {
   // Computed once per vine per frame and reused for both passes below,
   // rather than re-deriving the smoothed tip separately for stems and
@@ -345,6 +382,10 @@ function drawVines(pg) {
   pg.beginShape(TRIANGLES);
   displayTrails.forEach((trail) => addVineLeaves(pg, trail));
   pg.endShape();
+
+  if (VINE_RENDER_JASMINE) {
+    displayTrails.forEach((trail, i) => drawVineJasmine(pg, vines[i], trail));
+  }
 
   pg.pop();
 }

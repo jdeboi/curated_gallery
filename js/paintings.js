@@ -145,10 +145,11 @@ function drawPolygon(pg, poly, { fillColor, strokeColor, weight } = {}) {
 // of its own and naturally looks random since every painting runs on an
 // independent timer.
 //
-// "wipe", "wipeDown", and "pulse" are per-painting animated modes - each
-// paints its own polygon per painting (pulse offset so paintings don't move
-// in lockstep; wipe/wipeDown travel across all of them at once, left-to-right
-// and top-to-bottom respectively) rather than resolving one state for every
+// "wipe", "wipeDown", "wipeRadial", and "pulse" are per-painting animated
+// modes - each paints its own polygon per painting (pulse offset so paintings
+// don't move in lockstep; wipe/wipeDown/wipeRadial travel across all of them
+// at once, left-to-right, top-to-bottom, and outward from the wall's center
+// respectively) rather than resolving one state for every
 // painting alike. "curtain"/"curtainVertical" and "groupPulse" are
 // group-based instead: paintings (and, per PULSE_GROUPS, wing sculptures too,
 // for "groupPulse") take turns by wall-declared group rather than
@@ -168,6 +169,7 @@ const PAINTING_LIGHT_OVERRIDES = [
   "curtainVertical",
   "wipe",
   "wipeDown",
+  "wipeRadial",
   "pulse",
   "groupPulse",
 ];
@@ -457,6 +459,43 @@ function wipeDownLitFraction(poly) {
   return wipeFractionAtPosition(wipeDownPosition(poly, wipeDownStats()));
 }
 
+// "wipeRadial": same sweep as "wipe" above but normalized against each
+// centroid's distance from the wall's center (WALL_BOUNDS' midpoint - the
+// same point js/jasmine.js pulses out from), so it travels outward in a ring
+// instead of across. Like "wipe", distance is normalized against the
+// participants' own nearest/farthest centroid rather than the wall bounds,
+// so the ring starts at whichever participant sits closest to the center.
+// Joins paintings + wing sculptures the same way wipeBasisPolygons() does.
+function wipeRadialBasisPolygons() {
+  const polys = [];
+  if (currentPaintingState() === "wipeRadial") polys.push(...getPaintingPolygons());
+  if (currentButterflyState() === "wipeRadial") polys.push(...getOutlinePolygons());
+  return polys;
+}
+
+function wipeRadialDistance(poly) {
+  const c = polygonCentroid(poly);
+  return Math.hypot(c.x - WALL_BOUNDS.w / 2, c.y - WALL_BOUNDS.h / 2);
+}
+
+let _wipeRadialStatsCache = null;
+let _wipeRadialStatsCacheFrame = -1;
+
+function wipeRadialStats() {
+  if (_wipeRadialStatsCacheFrame === frameCount) return _wipeRadialStatsCache;
+  const ds = wipeRadialBasisPolygons().map(wipeRadialDistance);
+  const minD = ds.length ? Math.min(...ds) : 0;
+  const span = ds.length ? Math.max(Math.max(...ds) - minD, 1) : 1;
+  _wipeRadialStatsCache = { minD, span };
+  _wipeRadialStatsCacheFrame = frameCount;
+  return _wipeRadialStatsCache;
+}
+
+function wipeRadialLitFraction(poly) {
+  const { minD, span } = wipeRadialStats();
+  return wipeFractionAtPosition((wipeRadialDistance(poly) - minD) / span);
+}
+
 // Maps elapsed time t (0..duration) to a sweep position padded by
 // PAINTING_WIPE_BAND on both ends, so a participant at position 0 starts
 // the sweep already fully faded out and one at position 1 ends it fully
@@ -516,6 +555,11 @@ function drawWipePaintings(pg, polygons) {
 
 function drawWipeDownPaintings(pg, polygons) {
   const fractions = polygons.map(wipeDownLitFraction);
+  drawPaintingsWithFractions(pg, polygons, fractions);
+}
+
+function drawWipeRadialPaintings(pg, polygons) {
+  const fractions = polygons.map(wipeRadialLitFraction);
   drawPaintingsWithFractions(pg, polygons, fractions);
 }
 
@@ -687,6 +731,7 @@ function drawPaintings(pg) {
     return drawRandomOutlinePaintings(pg, polygons);
   if (stateValue === "wipe") return drawWipePaintings(pg, polygons);
   if (stateValue === "wipeDown") return drawWipeDownPaintings(pg, polygons);
+  if (stateValue === "wipeRadial") return drawWipeRadialPaintings(pg, polygons);
   if (stateValue === "pulse") return drawPulsePaintings(pg, polygons);
   if (stateValue === "groupPulse") return drawGroupPulsePaintings(pg, polygons);
 

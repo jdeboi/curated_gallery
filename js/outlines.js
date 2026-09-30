@@ -129,6 +129,7 @@ const BUTTERFLY_LIGHT_OVERRIDES = [
   "random",
   "wipe",
   "wipeDown",
+  "wipeRadial",
   "groupPulse",
 ];
 let butterflyLightOverride = "auto";
@@ -186,6 +187,16 @@ function drawButterflyLightState(pg, index, refMap) {
   // *also* "wipeDown" (see wipeDownBasisPolygons() there).
   if (stateValue === "wipeDown") {
     const fraction = wipeDownLitFraction(localPoints);
+    const onKeyframe = lightStateKeyframe("filled");
+    const offKeyframe = lightStateKeyframe("off");
+    const resolved = crossfadeKeyframes(offKeyframe, onKeyframe, fraction);
+    drawLightShape(pg, localPoints, resolved, { strokeWeight: 9 });
+    return;
+  }
+  // "wipeRadial": same again but rippling outward from the wall's center,
+  // joining js/paintings.js's "wipeRadial" basis (wipeRadialBasisPolygons()).
+  if (stateValue === "wipeRadial") {
+    const fraction = wipeRadialLitFraction(localPoints);
     const onKeyframe = lightStateKeyframe("filled");
     const offKeyframe = lightStateKeyframe("off");
     const resolved = crossfadeKeyframes(offKeyframe, onKeyframe, fraction);
