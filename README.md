@@ -114,9 +114,13 @@ phone page at `/remote`. It controls **every wall at once**:
 
 The schedule math lives in `js/showClock.js`, shared by the walls and the
 server, so the server's idea of "current"/"next" matches every wall's.
-The walls still run the clock-driven show on their own if the relay is
-down - the remote only adds control on top. Keyboard controls stay local
-to one wall.
+Walls sync their clocks to the relay's (`/api/time`), so they share one
+timeline even if the wall computers' clocks disagree, and any wall that
+ends up held without the remote saying so is pulled back to the clock on
+the relay's next broadcast. The walls still run the clock-driven show on
+their own if the relay is down - the remote only adds control on top.
+Keyboard controls stay local to one wall (an arrow-key hold lasts until
+the phone's next command).
 
 **Hosted (Railway)** - works from anywhere, walls just need internet:
 

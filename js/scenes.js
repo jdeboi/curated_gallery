@@ -334,6 +334,13 @@ let lastElapsedInScene = 0; // for the status readout only
 // is what a wall does when there's no remote at all.
 let showOffsetMs = 0; // the show plays at Date.now() + this; "next" bumps it
 let showStopped = false; // "stop": the whole wall goes black
+// This machine's clock vs the relay's (js/remote.js measures it), so walls on
+// different computers share one timeline even if their clocks disagree.
+let showClockSkewMs = 0;
+// True when the current hold came from this wall's own keyboard (arrows /
+// space) rather than the phone's lock - the remote leaves those alone until
+// its next command, but otherwise always pulls a held wall back to the clock.
+let showHeldLocally = false;
 
 function currentScene() {
   return SCENES[sceneIndex];
@@ -345,7 +352,7 @@ function currentScene() {
 // shuffle-per-loop and the math itself live in js/showClock.js so the
 // remote-control relay (server.js) can run the exact same schedule.
 function computeShowPosition(nowMs) {
-  return showClock.showPosition(SCENE_DURATIONS, nowMs + showOffsetMs);
+  return showClock.showPosition(SCENE_DURATIONS, nowMs + showClockSkewMs + showOffsetMs);
 }
 
 function enterScene(index) {
@@ -366,17 +373,23 @@ function initShow() {
 // schedule says the show should be right now (see toggleShowPlaying).
 function nextScene() {
   showPlaying = false;
+  showHeldLocally = true;
   enterScene(sceneIndex + 1);
 }
 
 function previousScene() {
   showPlaying = false;
+  showHeldLocally = true;
   enterScene(sceneIndex - 1);
 }
 
 function toggleShowPlaying() {
-  if (showPlaying) showPlaying = false;
-  else resumeShow();
+  if (showPlaying) {
+    showPlaying = false;
+    showHeldLocally = true;
+  } else {
+    resumeShow();
+  }
 }
 
 // Same hold as the arrow keys, but jumping straight to a scene by name -
@@ -387,6 +400,7 @@ function holdSceneByName(name) {
   const index = SCENES.findIndex((s) => s.name === name);
   if (index < 0) return false;
   showPlaying = false;
+  showHeldLocally = false;
   if (index !== sceneIndex) enterScene(index);
   return true;
 }
@@ -396,6 +410,7 @@ function holdSceneByName(name) {
 // agrees it's the one that should be on (e.g. unlocking from the phone).
 function resumeShow() {
   showPlaying = true;
+  showHeldLocally = false;
   const pos = computeShowPosition(Date.now());
   if (pos.sceneIndex !== sceneIndex) enterScene(pos.sceneIndex);
   lastElapsedInScene = pos.elapsedInScene;

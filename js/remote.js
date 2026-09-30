@@ -56,9 +56,11 @@ function applyRemoteShow(show) {
   setShowStopped(!show.running); // js/scenes.js
   if (show.locked) {
     holdSceneByName(show.locked); // js/scenes.js
-  } else if (isNewCommand && !showPlaying) {
-    // Unlock / next from the phone also ends a local arrow-key hold - but
-    // merely (re)connecting to an unlocked relay doesn't.
+  } else if (!showPlaying && (!showHeldLocally || isNewCommand)) {
+    // Unlocked: any hold that didn't come from this wall's own keyboard goes
+    // back to the clock on every message (the relay re-broadcasts every
+    // ~15s), so a missed unlock can't leave walls apart for good. A
+    // keyboard hold survives until the phone's next command.
     resumeShow(); // js/scenes.js
   }
   reportRemoteStatus();
@@ -79,9 +81,32 @@ function reportRemoteStatus() {
   }).catch(() => {});
 }
 
+// Measure this machine's clock against the relay's: a few round trips,
+// keeping the one with the shortest RTT (least network noise), assuming the
+// server read its clock halfway through it.
+async function syncRemoteClock() {
+  let best = null;
+  for (let i = 0; i < 5; i++) {
+    try {
+      const sent = Date.now();
+      const res = await fetch(`${remoteBase}/api/time`, { cache: "no-store" });
+      const { now } = await res.json();
+      const received = Date.now();
+      const rtt = received - sent;
+      if (!best || rtt < best.rtt) best = { rtt, skew: now + rtt / 2 - received };
+    } catch (err) {
+      return;
+    }
+  }
+  if (best) showClockSkewMs = best.skew; // js/scenes.js
+}
+
 async function initRemote() {
   remoteBase = await resolveRemoteBase();
   if (!remoteBase) return;
+
+  await syncRemoteClock();
+  setInterval(syncRemoteClock, 5 * 60 * 1000); // clocks drift
 
   const events = new EventSource(`${remoteBase}/api/events`);
   events.onopen = () => {

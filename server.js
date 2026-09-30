@@ -161,6 +161,13 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  // Walls sync their clocks to this one (js/remote.js's syncRemoteClock), so
+  // they share a timeline even when the wall computers' clocks disagree.
+  if (url.pathname === "/api/time" && req.method === "GET") {
+    res.setHeader("Cache-Control", "no-store");
+    return sendJson(res, 200, { now: Date.now() });
+  }
+
   if (url.pathname === "/api/state" && req.method === "GET") {
     return sendJson(res, 200, snapshot());
   }
