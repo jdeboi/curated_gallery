@@ -1,0 +1,324 @@
+<!doctype html>
+<!--
+  Phone remote for the walls - served by server.js (open /remote on the relay).
+  Controls the shared show state every wall follows (js/remote.js): start /
+  stop (black), next, lock / unlock, or tap a scene to lock straight onto it.
+  If the relay has CONTROL_TOKEN set, open this once as /remote?token=<it>
+  and it's remembered on the phone.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <title>Wall Remote</title>
+    <style>
+      :root {
+        --bg: #0b0b0c;
+        --panel: #18181b;
+        --line: #2a2a2e;
+        --text: #f2f2f3;
+        --muted: #8b8b92;
+        --accent: #f5d76e;
+        --stop: #e5484d;
+        --go: #3fb950;
+      }
+      * {
+        box-sizing: border-box;
+        -webkit-tap-highlight-color: transparent;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
+      }
+      main {
+        max-width: 480px;
+        margin: 0 auto;
+      }
+      .now {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 16px;
+        margin-bottom: 14px;
+      }
+      .label {
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .scene {
+        font-size: 26px;
+        font-weight: 650;
+        margin: 4px 0 6px;
+        word-break: break-word;
+      }
+      .badges {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .badge {
+        font-size: 12px;
+        padding: 3px 8px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        color: var(--muted);
+      }
+      .badge.on {
+        color: #000;
+        background: var(--accent);
+        border-color: var(--accent);
+      }
+      .badge.stopped {
+        color: #fff;
+        background: var(--stop);
+        border-color: var(--stop);
+      }
+      .controls {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        margin-bottom: 18px;
+      }
+      button {
+        font: inherit;
+        color: var(--text);
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 18px 12px;
+        font-size: 18px;
+        font-weight: 600;
+        touch-action: manipulation;
+      }
+      button:active {
+        transform: scale(0.98);
+        filter: brightness(1.3);
+      }
+      button:disabled {
+        opacity: 0.4;
+      }
+      #startStop.stop {
+        background: var(--stop);
+        border-color: var(--stop);
+      }
+      #startStop.start {
+        background: var(--go);
+        border-color: var(--go);
+        color: #000;
+      }
+      #lock.locked {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #000;
+      }
+      #next {
+        grid-column: 1 / -1;
+      }
+      h2 {
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+        font-weight: 600;
+        margin: 0 0 8px;
+      }
+      .walls {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-bottom: 18px;
+        font-size: 14px;
+      }
+      .wall {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 6px 10px;
+      }
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--stop);
+      }
+      .dot.online {
+        background: var(--go);
+      }
+      .list {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+      .list button {
+        font-size: 14px;
+        font-weight: 500;
+        padding: 12px 8px;
+        border-radius: 10px;
+        overflow-wrap: anywhere;
+      }
+      .list button.current {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .msg {
+        min-height: 20px;
+        font-size: 13px;
+        color: var(--muted);
+        margin: -8px 0 12px;
+      }
+      .msg.err {
+        color: var(--stop);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="now">
+        <div class="label">Now showing</div>
+        <div class="scene" id="scene">–</div>
+        <div class="badges" id="badges"></div>
+      </section>
+
+      <div class="controls">
+        <button id="startStop">…</button>
+        <button id="lock">…</button>
+        <button id="next">Next scene →</button>
+      </div>
+      <div class="msg" id="msg">Connecting…</div>
+
+      <h2>Walls</h2>
+      <div class="walls" id="walls"></div>
+
+      <h2>Lock onto a scene</h2>
+      <div class="list" id="list"></div>
+    </main>
+
+    <script>
+      const TOKEN_KEY = "wallRemoteToken";
+      const params = new URLSearchParams(location.search);
+      let token = "";
+      try {
+        if (params.get("token")) localStorage.setItem(TOKEN_KEY, params.get("token"));
+        token = localStorage.getItem(TOKEN_KEY) || "";
+      } catch (err) {
+        token = params.get("token") || "";
+      }
+
+      const $ = (id) => document.getElementById(id);
+      let state = null;
+
+      function setMsg(text, isError) {
+        $("msg").textContent = text;
+        $("msg").className = "msg" + (isError ? " err" : "");
+      }
+
+      async function send(action, extra) {
+        try {
+          const res = await fetch("/api/command", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action, token, ...extra }),
+          });
+          const body = await res.json();
+          if (res.status === 401) {
+            const entered = prompt("Remote password (CONTROL_TOKEN):");
+            if (entered) {
+              token = entered;
+              try {
+                localStorage.setItem(TOKEN_KEY, token);
+              } catch (err) {}
+              return send(action, extra);
+            }
+          }
+          if (!res.ok) setMsg(body.error || "Command failed", true);
+          else setMsg("");
+        } catch (err) {
+          setMsg("Can't reach the relay", true);
+        }
+      }
+
+      function render() {
+        const { show, current, scenes, walls } = state;
+        $("scene").textContent = show.running ? current || "–" : "Stopped (black)";
+
+        const badges = [];
+        if (!show.running) badges.push('<span class="badge stopped">stopped</span>');
+        badges.push(
+          show.locked
+            ? '<span class="badge on">locked</span>'
+            : '<span class="badge">following clock</span>',
+        );
+        $("badges").innerHTML = badges.join("");
+
+        const ss = $("startStop");
+        ss.textContent = show.running ? "■ Stop" : "▶ Start";
+        ss.className = show.running ? "stop" : "start";
+
+        const lock = $("lock");
+        lock.textContent = show.locked ? "Unlock" : "Lock scene";
+        lock.className = show.locked ? "locked" : "";
+
+        const noScenes = scenes.length === 0;
+        $("next").disabled = noScenes;
+        lock.disabled = noScenes && !show.locked;
+
+        $("walls").innerHTML = walls.length
+          ? walls
+              .map(
+                (w) =>
+                  `<div class="wall"><span class="dot ${w.online ? "online" : ""}"></span>${esc(w.id)}` +
+                  `<span style="color:var(--muted)">${w.online ? esc(w.stopped ? "stopped" : w.scene || "") : "offline"}</span></div>`,
+              )
+              .join("")
+          : '<span style="color:var(--muted)">No walls connected yet</span>';
+
+        const list = $("list");
+        list.innerHTML = "";
+        for (const name of scenes) {
+          const b = document.createElement("button");
+          b.textContent = name;
+          if (name === current) b.className = "current";
+          b.onclick = () => send("lock", { scene: name });
+          list.appendChild(b);
+        }
+      }
+
+      function esc(s) {
+        return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+      }
+
+      $("startStop").onclick = () => send(state && state.show.running ? "stop" : "start");
+      $("lock").onclick = () => send(state && state.show.locked ? "unlock" : "lock");
+      $("next").onclick = () => send("next");
+
+      const events = new EventSource("/api/events");
+      events.onopen = () => setMsg("");
+      events.onerror = () => setMsg("Reconnecting to relay…", true);
+      events.onmessage = (e) => {
+        state = JSON.parse(e.data);
+        render();
+      };
+
+      // "Now showing" follows the clock between server broadcasts too.
+      setInterval(() => {
+        fetch("/api/state")
+          .then((r) => r.json())
+          .then((s) => {
+            state = s;
+            render();
+          })
+          .catch(() => {});
+      }, 5000);
+    </script>
+  </body>
+</html>

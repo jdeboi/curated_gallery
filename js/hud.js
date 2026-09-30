@@ -15,11 +15,11 @@ const HUD_PADDING = 12;
 const HUD_LINE_HEIGHT = 24;
 const HUD_TEXT_SIZE = 16;
 const HUD_HINT_TEXT_SIZE = 12;
-const HUD_HINT = "arrows/space: scene    w: painting mode    q: butterfly mode    p: parenting    m: mirror fx    e: eyes    c: calibrate    h: hud";
+const HUD_HINT = "arrows/space: scene (local)    w: painting mode    q: butterfly mode    p: parenting    m: mirror fx    e: eyes    c: calibrate    h: hud";
 
-// "h" toggles this off entirely (see keyPressed() in each wall's sketch.js) -
-// e.g. for taking a clean screenshot/video of the show with no overlay text.
-let hudVisible = true;
+// Off by default - the walls open in presentation mode. "h" toggles it
+// (see keyPressed() in each wall's sketch.js).
+let hudVisible = false;
 
 function toggleHUD() {
   hudVisible = !hudVisible;
@@ -35,6 +35,7 @@ function displayHUD() {
     parentingStatusLine(), // js/parenting.js
     mirrorMaskEffectsStatusLine(), // js/mirrorMasks.js
     faceEyesStatusLine(), // js/faceEyes.js
+    remoteStatusLine(), // js/remote.js
   ];
 
   const panelWidth = 460;

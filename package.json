@@ -1,0 +1,11 @@
+{
+  "name": "curated-gallery",
+  "private": true,
+  "description": "Projection-mapped gallery walls + phone remote-control relay (server.js)",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

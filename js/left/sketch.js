@@ -202,10 +202,13 @@ function draw() {
       wallImg.height * 0.35,
     );
 
-  updateShow();
-  displayWall();
-  drawBlackoutMasksOverlay();
-  drawFaceEyesOverlay(); // js/faceEyes.js - on top of the masks too
+  // "stop" from the phone remote (js/remote.js) - the whole wall goes black.
+  if (!showStopped) {
+    updateShow();
+    displayWall();
+    drawBlackoutMasksOverlay();
+    drawFaceEyesOverlay(); // js/faceEyes.js - on top of the masks too
+  }
   drawSurfaceLabels();
 
   // Drawn last so it always sits on top of the wall content instead of

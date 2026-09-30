@@ -97,6 +97,47 @@ states" below.
 | `→` / `←` | Next / previous scene - a local preview override, stops following the clock |
 | `space` | Resume following the clock (snaps to wherever the schedule says "now" is) / pause |
 
+Walls open in presentation mode: HUD hidden (`h` shows it), calibration
+off, `maps/<wall>/map.json` loaded.
+
+## Phone remote
+
+`server.js` is a tiny zero-dependency relay the walls listen to, with a
+phone page at `/remote`. It controls **every wall at once**:
+
+- **Stop / Start** - stop turns the whole wall black.
+- **Next scene** - skips the shared clock forward to the next scene in the
+  schedule, so walls stay in step and keep following global time after.
+- **Lock / Unlock** - hold the current scene (or tap any scene in the list
+  to lock onto it). While locked, Next moves the lock along. Unlock picks
+  the clock back up from the locked scene.
+
+The schedule math lives in `js/showClock.js`, shared by the walls and the
+server, so the server's idea of "current"/"next" matches every wall's.
+The walls still run the clock-driven show on their own if the relay is
+down - the remote only adds control on top. Keyboard controls stay local
+to one wall.
+
+**Hosted (Railway)** - works from anywhere, walls just need internet:
+
+1. New Railway project -> deploy from this GitHub repo (it runs `npm start`).
+2. Variables: set `CONTROL_TOKEN` to a password.
+3. Settings -> Networking -> Generate Domain.
+4. Put that URL in `REMOTE_CONTROL_URL` in `js/remote.js` (or add
+   `?remote=https://...` to the wall URL).
+5. On the phone open `https://<domain>/remote?token=<password>` once
+   (remembered after) and add it to the home screen.
+
+The walls keep loading from local files (videos are gitignored), only
+the control messages go through Railway.
+
+**Local only (same wifi, no Railway)** - on a wall computer run
+`npm start` (serves the site on :8080 instead of http-server), open
+`http://localhost:8080/left.html`, and on the phone open
+`http://<that computer's IP>:8080/remote`. A wall served this way finds
+the relay on its own; the other wall's machine uses
+`?remote=http://<that IP>:8080`.
+
 ## Light states
 
 Wing sculptures and paintings both render through one shared vocabulary

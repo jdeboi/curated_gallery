@@ -11,9 +11,9 @@
  * the same elapsed-in-scene offset.
  *
  * The order scenes play in within each full pass is shuffled rather than
- * SCENES' own declared order - see shuffledSceneOrder()/orderForLoop()
- * below - but the shuffle is seeded from the loop number (elapsed time /
- * SHOW_TOTAL_DURATION), not Math.random(), so it's the same deterministic
+ * SCENES' own declared order - see js/showClock.js - but the shuffle is
+ * seeded from the loop number (elapsed time / total show duration), not
+ * Math.random(), so it's the same deterministic
  * function of wall-clock time as everything else here: two unlinked
  * instances still land on the same scene at the same moment, they just
  * don't see "black, mycelium, emanate, ..." in the same order every lap.
@@ -323,73 +323,29 @@ function sceneDuration(scene) {
   return scene.duration || DEFAULT_SCENE_DURATION;
 }
 
-const SHOW_TOTAL_DURATION = SCENES.reduce((sum, s) => sum + sceneDuration(s), 0);
+const SCENE_DURATIONS = SCENES.map(sceneDuration);
 
 let sceneIndex = 0;
-let showPlaying = true;
+let showPlaying = true; // false = held on one scene (arrow keys, or locked from the phone)
 let lastElapsedInScene = 0; // for the status readout only
+
+// Set by the phone remote (js/remote.js) and shared by every wall - see
+// js/showClock.js. Both default to "just run the clock-driven show", which
+// is what a wall does when there's no remote at all.
+let showOffsetMs = 0; // the show plays at Date.now() + this; "next" bumps it
+let showStopped = false; // "stop": the whole wall goes black
 
 function currentScene() {
   return SCENES[sceneIndex];
 }
 
-// Small deterministic PRNG (mulberry32), seeded from the loop number rather
-// than Math.random() - see shuffledSceneOrder()/orderForLoop() below for why
-// the "random" show order still has to be a pure function of wall-clock
-// time rather than actually random per process.
-function mulberry32(seed) {
-  let state = seed | 0;
-  return function () {
-    state = (state + 0x6d2b79f5) | 0;
-    let t = Math.imul(state ^ (state >>> 15), 1 | state);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-// A Fisher-Yates shuffle of SCENES' indices, seeded so the same loop number
-// always produces the same order - see orderForLoop().
-function shuffledSceneOrder(seed) {
-  const rand = mulberry32(seed);
-  const order = SCENES.map((_, i) => i);
-  for (let i = order.length - 1; i > 0; i--) {
-    const j = Math.floor(rand() * (i + 1));
-    [order[i], order[j]] = [order[j], order[i]];
-  }
-  return order;
-}
-
-// Caches the shuffle for the current loop so computeShowPosition() (called
-// every frame) isn't re-shuffling on every call - only recomputed when the
-// loop number actually advances.
-let cachedLoopIndex = null;
-let cachedOrder = null;
-function orderForLoop(loopIndex) {
-  if (loopIndex !== cachedLoopIndex) {
-    cachedLoopIndex = loopIndex;
-    cachedOrder = shuffledSceneOrder(loopIndex);
-  }
-  return cachedOrder;
-}
-
 // Maps a moment in wall-clock time to a scene index + how far into that
 // scene's duration it falls - the one piece of math every instance needs
-// to agree on for the show to stay in step without a network link. Which
-// scene that is comes from orderForLoop() rather than SCENES' own order,
-// so consecutive loops play scenes in a different (but still synced)
-// sequence - see the file header note on this.
+// to agree on for the show to stay in step without a network link. The
+// shuffle-per-loop and the math itself live in js/showClock.js so the
+// remote-control relay (server.js) can run the exact same schedule.
 function computeShowPosition(nowMs) {
-  const loopIndex = Math.floor(nowMs / SHOW_TOTAL_DURATION);
-  const order = orderForLoop(loopIndex);
-  let t = nowMs % SHOW_TOTAL_DURATION;
-  for (let i = 0; i < order.length; i++) {
-    const dur = sceneDuration(SCENES[order[i]]);
-    if (t < dur) return { sceneIndex: order[i], elapsedInScene: t };
-    t -= dur;
-  }
-  // Floating-point edge case at the exact wraparound instant.
-  const lastIndex = order[order.length - 1];
-  return { sceneIndex: lastIndex, elapsedInScene: sceneDuration(SCENES[lastIndex]) - 1 };
+  return showClock.showPosition(SCENE_DURATIONS, nowMs + showOffsetMs);
 }
 
 function enterScene(index) {
@@ -419,11 +375,45 @@ function previousScene() {
 }
 
 function toggleShowPlaying() {
-  showPlaying = !showPlaying;
-  if (showPlaying) {
-    const pos = computeShowPosition(Date.now());
-    enterScene(pos.sceneIndex);
-    lastElapsedInScene = pos.elapsedInScene;
+  if (showPlaying) showPlaying = false;
+  else resumeShow();
+}
+
+// Same hold as the arrow keys, but jumping straight to a scene by name -
+// used by the phone remote's lock (js/remote.js). Leaves the scene running
+// rather than restarting it if it's already the one on screen. Returns
+// false for a name this wall doesn't have (e.g. walls on different code).
+function holdSceneByName(name) {
+  const index = SCENES.findIndex((s) => s.name === name);
+  if (index < 0) return false;
+  showPlaying = false;
+  if (index !== sceneIndex) enterScene(index);
+  return true;
+}
+
+// Back to following the wall clock, snapped to wherever the schedule says
+// the show is right now. Leaves the live scene running if the schedule
+// agrees it's the one that should be on (e.g. unlocking from the phone).
+function resumeShow() {
+  showPlaying = true;
+  const pos = computeShowPosition(Date.now());
+  if (pos.sceneIndex !== sceneIndex) enterScene(pos.sceneIndex);
+  lastElapsedInScene = pos.elapsedInScene;
+}
+
+// "stop" from the phone: the wall goes black (see each wall's draw()).
+// Starting again re-enters the scene fresh rather than un-freezing it.
+function setShowStopped(stopped) {
+  if (stopped === showStopped) return;
+  showStopped = stopped;
+  if (!stopped) {
+    if (showPlaying) {
+      const pos = computeShowPosition(Date.now());
+      lastElapsedInScene = pos.elapsedInScene;
+      enterScene(pos.sceneIndex);
+    } else {
+      enterScene(sceneIndex);
+    }
   }
 }
 
@@ -448,8 +438,9 @@ function drawShowOverlay(pg) {
 // "scene 5/23: mycelium (12s)" - for the HUD (js/hud.js).
 function sceneStatusLine() {
   const scene = currentScene();
+  if (showStopped) return `scene ${sceneIndex + 1}/${SCENES.length}: ${scene.name} (stopped)`;
   const status = showPlaying
     ? `${Math.max(0, Math.ceil((sceneDuration(scene) - lastElapsedInScene) / 1000))}s`
-    : "manual";
+    : "held";
   return `scene ${sceneIndex + 1}/${SCENES.length}: ${scene.name} (${status})`;
 }
