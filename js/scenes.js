@@ -221,6 +221,7 @@ const SCENES = [
     init: initReactionDiffusion,
     update: updateReactionDiffusion,
     draw: drawReactionDiffusion, // js/reactionDiffusion.js - shader-based
+    paintingState: "randomOutline",
   },
   {
     name: "stars",
