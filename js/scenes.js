@@ -57,7 +57,7 @@
  * "outline", "off", or a pulse/switch descriptor between them) plus the
  * spotlight/animated painting-only modes from js/paintings.js ("sequence",
  * "random", "randomOutline", "curtain", "curtainVertical", "wipe",
- * "wipeDown", "pulse", "groupPulse").
+ * "wipeDown", "pulse", "groupPulse", "lookin").
  * Neither field is required: a scene that omits one gets
  * LIGHT_STATE_DEFAULT ("filled" -
  * everything illuminated), which is why plain scenes below don't set them
@@ -238,6 +238,17 @@ const SCENES = [
     draw: drawJasmine, // js/jasmine.js - radial size pulse from the wall center
     // Radial sweep outward from the same wall center the flowers pulse from.
     paintingState: "wipeRadial",
+  },
+  {
+    name: "lookin",
+    duration: 35000,
+    init: initLookin, // js/lookin.js - restarts every painting's cycle from a blank page
+    update: () => {},
+    draw: (pg) => pg.background(0),
+    // Each painting has "I SEE YOU LOOKIN" written across it, letter by
+    // letter, before it fades up to lit - staggered left-to-right.
+    paintingState: "lookin",
+    butterflyState: "outline",
   },
   // Painting-choreography scene: a plain black field so its painting mode
   // (js/paintings.js) reads clearly on its own, rather than competing with a

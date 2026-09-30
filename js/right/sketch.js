@@ -152,6 +152,7 @@ function setup() {
   loadButterflySprite(); // js/butterflies.js
   loadStarFlowerSprite(); // js/stars.js
   loadJasmineSprites(); // js/jasmine.js
+  loadLookinText(); // js/lookin.js
 
   pMapper = createProjectionMapper(this);
 

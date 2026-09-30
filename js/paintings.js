@@ -156,6 +156,9 @@ function drawPolygon(pg, poly, { fillColor, strokeColor, weight } = {}) {
 // individually - "curtain" adds the expand/collapse animation on top of that
 // same group relay; "groupPulse" is a plain crossfade - see
 // drawCurtainPaintingsUsing()/drawGroupPulsePaintings() below.
+//
+// "lookin" writes the "I SEE YOU LOOKIN" lettering across each dark painting
+// one letter at a time before fading it up to lit - see js/lookin.js.
 const PAINTING_LIGHT_OVERRIDES = [
   "auto",
   "filled",
@@ -172,6 +175,7 @@ const PAINTING_LIGHT_OVERRIDES = [
   "wipeRadial",
   "pulse",
   "groupPulse",
+  "lookin",
 ];
 let paintingLightOverride = "auto";
 const PAINTING_SPOTLIGHT_PERIOD = 1.5; // seconds between steps
@@ -734,6 +738,7 @@ function drawPaintings(pg) {
   if (stateValue === "wipeRadial") return drawWipeRadialPaintings(pg, polygons);
   if (stateValue === "pulse") return drawPulsePaintings(pg, polygons);
   if (stateValue === "groupPulse") return drawGroupPulsePaintings(pg, polygons);
+  if (stateValue === "lookin") return drawLookinPaintings(pg, polygons); // js/lookin.js
 
   const resolved = resolveLightState(stateValue);
 
