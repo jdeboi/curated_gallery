@@ -31,7 +31,7 @@
 
 const VIDEO_FILES = [
   // { path: "assets/video/checkers.mp4" },
-  { path: "assets/video/convergetriangles.mp4", paintingState: "filled" },
+  // { path: "assets/video/convergetriangles.mp4", paintingState: "filled" },
   {
     path: "assets/video/noisewaves.mp4",
     paintingState: "wipeDown",
