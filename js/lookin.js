@@ -14,14 +14,20 @@
  *     first, so the face "wakes up" once the words are done.
  *
  * Painting mode "lookin" (dispatched from js/paintings.js's drawPaintings())
- * then runs each painting through: dark + writing -> hold the text -> fade up
- * to "filled" (white fill swallows the white text) -> hold lit -> fade back
- * to dark -> loop. Paintings start staggered by LOOKIN_PAINTING_STAGGER in
- * left-to-right order, so the writing travels across the wall.
+ * then runs each painting through: outline fades in + writing -> hold the
+ * text -> fade up to "filled" (white fill swallows the white text and the
+ * outline) -> hold lit -> fade to dark ("off" - no outline) -> hold dark ->
+ * loop. The outline uses its own thinner LOOKIN_OUTLINE_WEIGHT rather than
+ * the 9px every other painting mode uses, so it doesn't compete with the
+ * lettering's own line. Like "random", every painting runs on its own
+ * timer - a random start delay (up to LOOKIN_MAX_START_DELAY) and its lit/
+ * dark holds jittered 0.7x-1.3x (paintingHash(), js/paintings.js) - so
+ * paintings get written on and light up in no particular order, and drift
+ * further apart each cycle.
  *
  * Timing is measured from lookinStartMs, which the "lookin" scene's init()
- * resets, so every painting starts from a blank page when the scene comes up
- * rather than mid-cycle. (Picking "lookin" via the "w" override instead just
+ * resets, so every painting's first turn starts from a blank page (after its
+ * own start delay) rather than mid-cycle. (Picking "lookin" via the "w" override instead just
  * runs off whatever lookinStartMs last was.)
  */
 
@@ -36,12 +42,14 @@ const LOOKIN_FACE_STAGGER = 0.2; // seconds between face parts starting
 const LOOKIN_FACE_POP = 0.4; // seconds for one face part's pop-in
 
 // Per-painting cycle, after the writing itself
-const LOOKIN_TEXT_HOLD = 1.5; // seconds the finished text sits on the dark painting
-const LOOKIN_FILL_FADE = 1.2; // seconds to fade dark -> lit
-const LOOKIN_LIT_HOLD = 6; // seconds held lit
+const LOOKIN_OUTLINE_FADE = 0.4; // seconds for the outline to fade in as writing starts
+const LOOKIN_OUTLINE_WEIGHT = 2; // outline stroke width in px (other painting modes use 9)
+const LOOKIN_TEXT_HOLD = 1.5; // seconds the finished text sits on the outlined painting
+const LOOKIN_FILL_FADE = 1.2; // seconds to fade outlined -> lit
+const LOOKIN_LIT_HOLD = 6; // seconds held lit (jittered per painting)
 const LOOKIN_UNFILL_FADE = 1.2; // seconds to fade lit -> dark
-const LOOKIN_DARK_HOLD = 1; // seconds dark before writing again
-const LOOKIN_PAINTING_STAGGER = 0.5; // seconds between neighboring paintings (left-to-right) starting
+const LOOKIN_DARK_HOLD = 4; // seconds held dark before writing again (jittered per painting)
+const LOOKIN_MAX_START_DELAY = 8; // a painting's first turn starts somewhere in 0..this many seconds into the scene
 
 // Text size within a painting - it's fit to whichever of these is tighter.
 const LOOKIN_FIT_WIDTH = 0.85; // max fraction of the painting's width
@@ -61,11 +69,11 @@ function loadLookinText() {
     .catch((err) => console.error("lookin: couldn't load " + LOOKIN_SVG_PATH, err));
 }
 
-// Parses the SVG, measures every path's bounding box (getBBox only works on
-// an element that's actually in the rendered document - hence the briefly
-// attached, invisible copy), and assigns each part its start time within the
-// write phase.
-function buildLookinArt(svgText) {
+// Parses an SVG into its viewBox size + one Path2D per <path>, each with its
+// measured bounding box. getBBox only works on an element that's actually in
+// the rendered document - hence the briefly attached, invisible copy. Shared
+// with js/lookinFaces.js.
+function parseSvgParts(svgText) {
   const doc = new DOMParser().parseFromString(svgText, "image/svg+xml");
   const svg = doc.documentElement;
   const [, , w, h] = (svg.getAttribute("viewBox") || "0 0 100 100").split(/[\s,]+/).map(Number);
@@ -79,7 +87,13 @@ function buildLookinArt(svgText) {
     return { path: new Path2D(el.getAttribute("d")), x: b.x, y: b.y, w: b.width, h: b.height };
   });
   holder.remove();
+  return { w, h, parts };
+}
 
+// Splits the text's paths into letters/face parts and assigns each its start
+// time within the write phase.
+function buildLookinArt(svgText) {
+  const { w, h, parts } = parseSvgParts(svgText);
   const { letters, face } = classifyLookinParts(parts);
   letters.sort((a, b) => a.x - b.x);
   face.sort((a, b) => a.w * a.h - b.w * b.h); // smallest first: pupil, eyebrows, ..., smile
@@ -135,25 +149,32 @@ function lookinEaseOutBack(t) {
   return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
 }
 
-// Where one painting is in its cycle `t` seconds after its own (staggered)
-// start: how lit it is (0-1), and how many seconds into the writing its text
-// should be drawn at (null = no text showing).
-function lookinPhase(t) {
-  if (t < 0) return { fill: 0, writeT: null }; // this painting's turn hasn't come up yet
+// Where painting `i` is in its cycle `t` seconds after its own start delay:
+// how much outline it has (0 = none, 1 = full), how lit it is (0 = dark, 1 =
+// filled - layered over the outline, see drawLookinPaintings()), and how many
+// seconds into the writing its text should be drawn at (null = no text).
+function lookinPhase(t, i) {
+  const dark = { outline: 0, fill: 0, writeT: null };
+  if (t < 0) return dark; // this painting's first turn hasn't come up yet
+  const jitter = 0.7 + paintingHash(i, 1) * 0.6; // same 0.7x-1.3x spread as curtainOpenFraction()
+  const litHold = LOOKIN_LIT_HOLD * jitter;
+  const darkHold = LOOKIN_DARK_HOLD * jitter;
   const w = lookinArt ? lookinArt.writeDuration : 0;
-  const period = w + LOOKIN_TEXT_HOLD + LOOKIN_FILL_FADE + LOOKIN_LIT_HOLD + LOOKIN_UNFILL_FADE + LOOKIN_DARK_HOLD;
+  const period = w + LOOKIN_TEXT_HOLD + LOOKIN_FILL_FADE + litHold + LOOKIN_UNFILL_FADE + darkHold;
   t %= period;
 
-  if (t < w) return { fill: 0, writeT: t };
+  if (t < w) return { outline: Math.min(t / LOOKIN_OUTLINE_FADE, 1), fill: 0, writeT: t };
   t -= w;
-  if (t < LOOKIN_TEXT_HOLD) return { fill: 0, writeT: w };
+  if (t < LOOKIN_TEXT_HOLD) return { outline: 1, fill: 0, writeT: w };
   t -= LOOKIN_TEXT_HOLD;
-  if (t < LOOKIN_FILL_FADE) return { fill: t / LOOKIN_FILL_FADE, writeT: w };
+  if (t < LOOKIN_FILL_FADE) return { outline: 1, fill: t / LOOKIN_FILL_FADE, writeT: w };
   t -= LOOKIN_FILL_FADE;
-  if (t < LOOKIN_LIT_HOLD) return { fill: 1, writeT: null };
-  t -= LOOKIN_LIT_HOLD;
-  if (t < LOOKIN_UNFILL_FADE) return { fill: 1 - t / LOOKIN_UNFILL_FADE, writeT: null };
-  return { fill: 0, writeT: null };
+  if (t < litHold) return { outline: 0, fill: 1, writeT: null };
+  t -= litHold;
+  // Outline is already gone by here, so this fades straight from white to
+  // plain black rather than back through the outline.
+  if (t < LOOKIN_UNFILL_FADE) return { outline: 0, fill: 1 - t / LOOKIN_UNFILL_FADE, writeT: null };
+  return dark;
 }
 
 function drawLookinPart(ctx, part, localT) {
@@ -212,20 +233,15 @@ function drawLookinText(pg, poly, writeT) {
 // Painting mode "lookin" - see file header.
 function drawLookinPaintings(pg, polygons) {
   const offKeyframe = lightStateKeyframe("off");
+  const outlineKeyframe = lightStateKeyframe("outline");
   const onKeyframe = lightStateKeyframe("filled");
-
-  // Rank each painting left-to-right by centroid so the stagger travels
-  // across the wall regardless of paintingMaps' declaration order.
-  const rank = [];
-  polygons
-    .map((poly, i) => ({ i, x: polygonCentroid(poly).x }))
-    .sort((a, b) => a.x - b.x)
-    .forEach((o, r) => (rank[o.i] = r));
-
   const elapsed = (millis() - lookinStartMs) / 1000;
   polygons.forEach((poly, i) => {
-    const { fill, writeT } = lookinPhase(elapsed - rank[i] * LOOKIN_PAINTING_STAGGER);
-    drawLightShape(pg, poly, crossfadeKeyframes(offKeyframe, onKeyframe, fill), { strokeWeight: 9 });
+    const startDelay = paintingHash(i, 2) * LOOKIN_MAX_START_DELAY;
+    const { outline, fill, writeT } = lookinPhase(elapsed - startDelay, i);
+    const base = crossfadeKeyframes(offKeyframe, outlineKeyframe, outline);
+    const resolved = crossfadeKeyframes(base, onKeyframe, fill);
+    drawLightShape(pg, poly, resolved, { strokeWeight: LOOKIN_OUTLINE_WEIGHT });
     if (writeT !== null) drawLookinText(pg, poly, writeT);
   });
 }

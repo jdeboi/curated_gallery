@@ -242,13 +242,16 @@ const SCENES = [
   {
     name: "lookin",
     duration: 35000,
-    init: initLookin, // js/lookin.js - restarts every painting's cycle from a blank page
-    update: () => {},
-    draw: (pg) => pg.background(0),
+    init: () => {
+      initLookin(); // js/lookin.js - restarts every painting's cycle from a blank page
+      initLookinFaces(); // js/lookinFaces.js
+    },
+    update: updateLookinFaces,
+    draw: drawLookinFaces, // tiled faces whose pupils glance around
     // Each painting has "I SEE YOU LOOKIN" written across it, letter by
-    // letter, before it fades up to lit - staggered left-to-right.
+    // letter, before it fades up to lit - each painting on its own random timer.
     paintingState: "lookin",
-    butterflyState: "outline",
+    butterflyState: "off",
   },
   // Painting-choreography scene: a plain black field so its painting mode
   // (js/paintings.js) reads clearly on its own, rather than competing with a

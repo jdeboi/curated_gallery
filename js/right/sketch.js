@@ -153,6 +153,7 @@ function setup() {
   loadStarFlowerSprite(); // js/stars.js
   loadJasmineSprites(); // js/jasmine.js
   loadLookinText(); // js/lookin.js
+  loadLookinFaces(); // js/lookinFaces.js
 
   pMapper = createProjectionMapper(this);
 
