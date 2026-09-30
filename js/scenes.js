@@ -174,7 +174,7 @@ const SCENES = [
     duration: 35000,
     init: initGrass,
     update: updateGrass,
-    draw: drawGrass, // js/grass.js - shader-based
+    draw: drawGrass, // js/grass.js
   },
   {
     name: "birds",
@@ -253,8 +253,11 @@ const SCENES = [
     init: initJasmine,
     update: updateJasmine,
     draw: drawJasmine, // js/jasmine.js - radial size pulse from the wall center
-    // Radial sweep outward from the same wall center the flowers pulse from.
+    // Radial sweep outward from the same wall center the flowers pulse from -
+    // paintings and wing sculptures share one sweep basis (see
+    // wipeRadialBasisPolygons() in js/paintings.js), so it reads as one wave.
     paintingState: "wipeRadial",
+    butterflyState: "wipeRadial",
   },
   {
     name: "lookin",

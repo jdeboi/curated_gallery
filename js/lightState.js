@@ -128,9 +128,8 @@ function isGlowMode(state) {
 // Shared by paintings (js/paintings.js) and wing sculptures
 // (js/outlines.js) so both render through the same glow look rather than
 // each having its own bespoke halo. `intensity` (0-1) scales every ring's
-// alpha - lets a caller fade the halo in over time (e.g. js/paintings.js's
-// "myceliumReveal" mode growing it in step with that painting's own
-// crossfade) instead of it only ever being fully on or absent.
+// alpha - lets a caller fade the halo in over time instead of it only ever
+// being fully on or absent.
 function drawGlow(pg, poly, intensity = 1) {
   const centroid = polygonCentroid(poly);
   const numRings = 4;

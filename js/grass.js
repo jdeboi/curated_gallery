@@ -1,192 +1,142 @@
 /*
- * "grass" scene - a dense field of grass blades covering the whole wall,
- * swaying in a traveling wind.
+ * "grass" scene - a field of grass blades covering the whole wall, swaying
+ * in a traveling wind.
  *
- * Rendered entirely in a fragment shader rather than drawn blade by blade:
- * a convincing grass texture needs thousands of blades, and (see
- * js/fronds.js's header) p5 2.0's immediate-mode vertex() is already the
- * frame-rate bottleneck at a few hundred curved shapes. Same shader
- * plumbing as js/fluidFall.js / js/reactionDiffusion.js - a raw
- * createShader() pair on its own WEBGL p5.Graphics, driven via
- * .shader()/.quad(), then image()'d into the wall panel's buffer at
- * WALL_BOUNDS size.
+ * Drawn as plain vector shapes straight into the wall panel's 2D buffer
+ * (no offscreen shader canvas), so blade edges stay crisp at any panel
+ * resolution. Each blade is one closed path - two quadratic curves from
+ * either side of its root up to a shared pointed tip - issued through the
+ * native canvas context (pg.drawingContext) rather than p5's
+ * beginShape()/vertex(): p5 2.0's immediate-mode vertex() is the frame-rate
+ * bottleneck at a few hundred curved shapes (see js/fronds.js's header),
+ * while a native quadraticCurveTo() is a single cheap call. p5's own
+ * translate() still applies, since it's set on that same context.
  *
  * The field is stacked rows (GRASS_ROW_SPACING apart, top to bottom of the
- * wall), each row split into narrow cells with one blade rooted per cell at
- * a hashed position/height/lean. Blades are taller than the row spacing, so
+ * wall), each row a line of blades GRASS_CELL_WIDTH apart with jittered
+ * root positions/heights/leans. Blades are taller than the row spacing, so
  * each row overlaps the rows above it - that overlap is what reads as a
- * continuous texture rather than separate strips. Per pixel, the shader
- * checks only the rows and cells whose blades could reach it, and keeps
- * whichever hit is rooted lowest (i.e. nearest the viewer), which gives
- * correct front-to-back occlusion without sorting anything.
+ * continuous lawn rather than separate strips. Rows are drawn back to front
+ * (top of the wall first), every blade in a row batched into one path with
+ * one fill + one stroke: the fill is a vertical gradient from black at the
+ * row's roots to white at its tallest tips, so each row fades into the
+ * shadow of the row in front of it, and the thin black stroke separates
+ * overlapping blades from each other.
  *
- * A blade bends by an offset that grows with the square of how far up it a
- * point is (stiff base, floppy tip - same cantilever approximation as
- * js/fronds.js). The wind driving that bend is a shared traveling wave
- * sampled at the blade's own root x, so neighboring blades bend together
- * and gusts visibly roll across the wall, plus a slow envelope for gusts.
+ * A blade bends toward its wind offset with a stiff base and floppy tip -
+ * the quadratic's control point sits partway up above the root, so the
+ * curve leaves the ground near-vertical and only curls at the top (same
+ * cantilever feel as js/fronds.js). The wind is a traveling wave plus
+ * shared noise sampled at each blade's own root x, so neighboring blades
+ * bend together and gusts visibly roll across the wall.
+ *
+ * Blade geometry is computed once per frame in updateGrass(): drawGrass()
+ * runs once per wall panel (js/wall.js's displayWall()), so doing the wind
+ * math there would repeat it for every panel.
  *
  * Blades grow up from nothing over GRASS_GROW_MS at scene start, so the
  * scene opens with the lawn sprouting rather than popping in.
  */
 
-const GRASS_BUFFER_SCALE = 1 / 2; // shader resolution vs. WALL_BOUNDS - blades are thin, so higher than fluidFall's 1/3
-const GRASS_ROW_SPACING = 42; // logical px between blade rows
-const GRASS_CELL_WIDTH = 11; // logical px per blade within a row - smaller = denser
-const GRASS_HEIGHT_MIN = 60;
-const GRASS_HEIGHT_MAX = 130;
-const GRASS_BASE_WIDTH = 2.6; // half-width at the root, logical px
-const GRASS_MAX_LEAN = 0.12; // static lean off vertical, as a fraction of blade height
+const GRASS_ROW_SPACING = 32; // logical px between blade rows
+const GRASS_CELL_WIDTH = 26; // logical px between blades within a row - smaller = denser
+const GRASS_ROOT_JITTER = 0.8; // root offset within its cell, as a fraction of cell width/row spacing
+const GRASS_HEIGHT_MIN = 45;
+const GRASS_HEIGHT_MAX = 95;
+const GRASS_BASE_WIDTH = 7; // half-width at the root, logical px
+const GRASS_MAX_LEAN = 0.25; // static lean off vertical, as a fraction of blade height
 const GRASS_BEND = 0.3; // max wind deflection at the tip, as a fraction of blade height
-const GRASS_WIND_SPEED = 1.0;
+const GRASS_WIND_SPEED = 2.0;
 const GRASS_GROW_MS = 5000;
-// Tip and root colors (0-1 RGB). White-on-black to match the other plant
+const GRASS_EDGE_WEIGHT = 1.5; // black stroke separating overlapping blades
+// Tip and root colors (CSS). White-on-black to match the other plant
 // scenes; roots fade toward black so overlapping rows read with depth.
-const GRASS_TIP_COLOR = [1.0, 1.0, 1.0];
-const GRASS_ROOT_COLOR = [0.0, 0.0, 0.0];
+const GRASS_TIP_COLOR = "rgb(255, 255, 255)";
+const GRASS_ROOT_COLOR = "rgb(0, 0, 0)";
 
-const GRASS_VERT = `#version 300 es
-in vec4 aPosition;
-in vec2 aTexCoord;
-out vec2 vTexCoord;
-void main() {
-  vTexCoord = aTexCoord;
-  gl_Position = aPosition;
-}
-`;
+let grassRows = []; // [{ rootY, blades: [{ x, y, height, lean, width, sway }] }]
+let grassPaths = []; // per row, this frame: { rootY, path: Path2D }
+let grassStartMs = 0;
 
-// Loop bounds must be compile-time constants in GLSL ES, so the row/cell
-// search windows are baked in from the JS constants above when the shader
-// is built (see grassFragSource()).
-function grassFragSource() {
-  const maxReach = GRASS_HEIGHT_MAX * (GRASS_MAX_LEAN + GRASS_BEND) + GRASS_BASE_WIDTH;
-  const rowSteps = Math.ceil(GRASS_HEIGHT_MAX / GRASS_ROW_SPACING) + 1;
-  const cellSteps = 2 * Math.ceil(maxReach / GRASS_CELL_WIDTH) + 1;
-  const f = (n) => n.toFixed(4);
-  return `#version 300 es
-precision highp float;
-in vec2 vTexCoord;
-out vec4 fragColor;
-uniform vec2 uWall;
-uniform float uTime;
-uniform float uGrow;
-uniform float uAA;
-uniform vec3 uTip;
-uniform vec3 uRoot;
-
-const float ROW = ${f(GRASS_ROW_SPACING)};
-const float CELL = ${f(GRASS_CELL_WIDTH)};
-const float HMIN = ${f(GRASS_HEIGHT_MIN)};
-const float HMAX = ${f(GRASS_HEIGHT_MAX)};
-const float BASE_W = ${f(GRASS_BASE_WIDTH)};
-const float LEAN = ${f(GRASS_MAX_LEAN)};
-const float BEND = ${f(GRASS_BEND)};
-const float REACH = ${f(maxReach)};
-const int ROW_STEPS = ${rowSteps};
-const int CELL_STEPS = ${cellSteps};
-
-float hash(vec2 p) {
-  p = fract(p * vec2(123.34, 456.21));
-  p += dot(p, p + 45.32);
-  return fract(p.x * p.y);
+function initGrass() {
+  grassStartMs = millis();
+  grassRows = [];
+  const rows = Math.ceil(WALL_BOUNDS.h / GRASS_ROW_SPACING) + 1;
+  const cols = Math.ceil(WALL_BOUNDS.w / GRASS_CELL_WIDTH) + 1;
+  for (let r = 0; r < rows; r++) {
+    const rowY = r * GRASS_ROW_SPACING;
+    const blades = [];
+    for (let c = -1; c < cols; c++) {
+      blades.push({
+        x: (c + random(GRASS_ROOT_JITTER)) * GRASS_CELL_WIDTH,
+        y: rowY + random(GRASS_ROOT_JITTER) * GRASS_ROW_SPACING,
+        height: random(GRASS_HEIGHT_MIN, GRASS_HEIGHT_MAX),
+        lean: random(-1, 1) * GRASS_MAX_LEAN,
+        width: GRASS_BASE_WIDTH * random(0.7, 1.3),
+        sway: random(0.8, 1.2),
+      });
+    }
+    grassRows.push({ rootY: rowY + GRASS_ROW_SPACING, blades });
+  }
+  grassPaths = [];
 }
 
-float vnoise(float x) {
-  float i = floor(x);
-  float f = fract(x);
-  float u = f * f * (3.0 - 2.0 * f);
-  return mix(hash(vec2(i, 7.1)), hash(vec2(i + 1.0, 7.1)), u) * 2.0 - 1.0;
-}
-
-// Traveling wind wave, -1..1-ish, sampled at a blade's root x.
-float wind(float x) {
-  float gust = 0.55 + 0.45 * sin(uTime * 0.21);
-  float w = 0.6 * sin(x * 0.005 - uTime * 1.1) + 0.5 * vnoise(x * 0.012 - uTime * 0.7);
+// Traveling wind wave, roughly -1..1 (biased slightly to one side so the
+// lawn has a prevailing lean), sampled at a blade's root x.
+function grassWind(x, t) {
+  const gust = 0.55 + 0.45 * Math.sin(t * 0.21);
+  const w =
+    0.6 * Math.sin(x * 0.005 - t * 1.1) +
+    0.5 * (noise(x * 0.012 - t * 0.7, 71) * 2 - 1);
   return w * gust + 0.25;
 }
 
-void main() {
-  vec2 p = vTexCoord * uWall;
-  float bestRoot = -1.0;
-  vec3 color = vec3(0.0);
+function updateGrass() {
+  const grow = Math.min(1, (millis() - grassStartMs) / GRASS_GROW_MS);
+  const growEase = 1 - Math.pow(1 - grow, 3); // ease-out so the sprout slows as it reaches full height
+  const t = (millis() / 1000) * GRASS_WIND_SPEED;
 
-  int row0 = int(floor(p.y / ROW));
-  int cell0 = int(floor((p.x - REACH) / CELL));
-  for (int r = 0; r < ROW_STEPS; r++) {
-    float row = float(row0 + r);
-    for (int c = 0; c < CELL_STEPS; c++) {
-      float cell = float(cell0 + c);
-      vec2 id = vec2(cell, row);
-      float h1 = hash(id);
-      float h2 = hash(id + 17.3);
-      float h3 = hash(id + 41.9);
-
-      float root = (row + h2) * ROW;
-      if (root < p.y || root <= bestRoot) continue;
-
-      float height = mix(HMIN, HMAX, h1) * uGrow;
-      float t = (root - p.y) / max(height, 0.001);
-      if (t > 1.0) continue;
-
-      float baseX = (cell + h3) * CELL;
-      float lean = (h2 - 0.5) * 2.0 * LEAN * height;
-      float sway = wind(baseX) * BEND * height * (0.8 + 0.4 * h1);
-      float bladeX = baseX + lean * t + sway * t * t;
-      float halfW = BASE_W * (0.7 + 0.6 * h3) * (1.0 - t);
-      float dx = abs(p.x - bladeX);
-      float cover = 1.0 - smoothstep(halfW - uAA, halfW + uAA, dx);
-      if (cover <= 0.0) continue;
-
-      // Midrib highlight across the blade, plus per-blade brightness jitter.
-      float rib = 0.75 + 0.25 * clamp(1.0 - dx / max(halfW, 0.001), 0.0, 1.0);
-      vec3 col = mix(uRoot, uTip, smoothstep(0.0, 0.75, t)) * rib * (0.7 + 0.3 * h1);
-      color = mix(color, col, cover);
-      if (cover > 0.5) bestRoot = root;
-    }
-  }
-  fragColor = vec4(color, 1.0);
-}`;
+  grassPaths = grassRows.map((row) => {
+    const path = new Path2D();
+    row.blades.forEach((b) => {
+      const h = b.height * growEase;
+      if (h < 1) return;
+      const tipX = b.x + (b.lean + grassWind(b.x, t) * GRASS_BEND * b.sway) * h;
+      const tipY = b.y - h;
+      // Control point partway up, only slightly leaned - stiff base, and
+      // most of the bend happens near the tip.
+      const ctrlX = b.x + b.lean * h * 0.5;
+      const ctrlY = b.y - h * 0.55;
+      const w = b.width * Math.min(1, growEase * 2);
+      path.moveTo(b.x - w, b.y);
+      path.quadraticCurveTo(ctrlX - w * 0.8, ctrlY, tipX, tipY);
+      path.quadraticCurveTo(ctrlX + w * 0.8, ctrlY, b.x + w, b.y);
+      path.closePath();
+    });
+    return { rootY: row.rootY, path };
+  });
 }
-
-let grassCanvas, grassShader;
-let grassStartMs = 0;
-
-// Same guard-not-a-resize-handler pattern as js/fluidFall.js's
-// fluidEnsureBuffers() - WALL_BOUNDS is fixed once setup() runs.
-function grassEnsureBuffers() {
-  const w = Math.max(1, Math.round(WALL_BOUNDS.w * GRASS_BUFFER_SCALE));
-  const h = Math.max(1, Math.round(WALL_BOUNDS.h * GRASS_BUFFER_SCALE));
-  if (grassCanvas && grassCanvas.width === w && grassCanvas.height === h) return;
-
-  grassCanvas = createGraphics(w, h, WEBGL);
-  grassCanvas.pixelDensity(1);
-  grassCanvas.noStroke();
-  grassShader = grassCanvas.createShader(GRASS_VERT, grassFragSource());
-}
-
-function initGrass() {
-  grassEnsureBuffers();
-  grassStartMs = millis();
-}
-
-function updateGrass() {}
 
 function drawGrass(pg) {
-  grassEnsureBuffers();
-
-  const elapsed = millis() - grassStartMs;
-  const grow = Math.min(1, elapsed / GRASS_GROW_MS);
-
-  grassCanvas.shader(grassShader);
-  grassShader.setUniform("uWall", [WALL_BOUNDS.w, WALL_BOUNDS.h]);
-  grassShader.setUniform("uTime", (millis() / 1000) * GRASS_WIND_SPEED);
-  // Ease-out so the sprout slows as it reaches full height.
-  grassShader.setUniform("uGrow", 1 - Math.pow(1 - grow, 3));
-  // One buffer pixel of edge softening, expressed in logical units.
-  grassShader.setUniform("uAA", 1 / GRASS_BUFFER_SCALE);
-  grassShader.setUniform("uTip", GRASS_TIP_COLOR);
-  grassShader.setUniform("uRoot", GRASS_ROOT_COLOR);
-  grassCanvas.quad(-1, 1, 1, 1, 1, -1, -1, -1);
-
-  pg.image(grassCanvas, 0, 0, WALL_BOUNDS.w, WALL_BOUNDS.h);
+  pg.background(0);
+  const ctx = pg.drawingContext;
+  ctx.save();
+  ctx.strokeStyle = GRASS_ROOT_COLOR;
+  ctx.lineWidth = 0; //GRASS_EDGE_WEIGHT;
+  ctx.lineJoin = "round";
+  grassPaths.forEach(({ rootY, path }) => {
+    const grad = ctx.createLinearGradient(
+      0,
+      rootY,
+      0,
+      rootY - GRASS_HEIGHT_MAX,
+    );
+    grad.addColorStop(0, GRASS_ROOT_COLOR);
+    grad.addColorStop(0.75, GRASS_TIP_COLOR);
+    ctx.fillStyle = grad;
+    ctx.fill(path);
+    ctx.stroke(path);
+  });
+  ctx.restore();
 }
+``;

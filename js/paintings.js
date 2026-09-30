@@ -697,9 +697,7 @@ function drawGroupPulsePaintings(pg, polygons) {
 // crossfades from "off" to "filled" as js/mycelium.js's
 // myceliumPaintingRevealFraction() rises from 0 (untouched) to 1 (fully
 // revealed), the same crossfadeKeyframes() plumbing drawGroupPulsePaintings
-// uses for its own group-driven fraction - plus a drawGlow() halo grown in
-// step with that same fraction, so the reveal reads as the painting
-// actually illuminating rather than just its fill swapping color. (The
+// uses for its own group-driven fraction. (The
 // mossy edge-crawl ring that grows in tandem, around the painting's own
 // perimeter, is drawn separately by js/mycelium.js's drawMycelium() - it
 // lives on the scene layer underneath this, not here.)
@@ -708,7 +706,6 @@ function drawMyceliumRevealPaintings(pg, polygons) {
   const onKeyframe = lightStateKeyframe("filled");
   polygons.forEach((poly, i) => {
     const fraction = myceliumPaintingRevealFraction(i);
-    if (fraction > 0) drawGlow(pg, poly, fraction);
     const resolved = crossfadeKeyframes(offKeyframe, onKeyframe, fraction);
     drawLightShape(pg, poly, resolved, { strokeWeight: 9 });
   });

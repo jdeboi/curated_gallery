@@ -26,11 +26,11 @@
  * own reveal though - see myceliumTouchPainting()/
  * myceliumPaintingRevealFraction() below, js/paintings.js's
  * "myceliumReveal" paintingState (crossfading the painting itself from
- * "off" to "filled", plus a drawGlow() halo, over MYCELIUM_REVEAL_DURATION),
- * and drawMyceliumPaintingEdges() further down here - a second, mossier
+ * "off" to "filled" over MYCELIUM_REVEAL_DURATION),
+ * and myceliumBuildEdgePaths() further down here - a second, mossier
  * ring of growth crawling from that same contact point around the
  * painting's own perimeter in both directions, timed to finish closing
- * exactly as the fade/glow complete, so all three read as one continuous
+ * exactly as the fade completes, so both read as one continuous
  * "the painting is waking up" effect rather than separate layers. Leaving
  * every painting's reveal to wherever the random roots/forks happen to
  * wander risked some paintings never getting touched at all in a given
@@ -49,7 +49,12 @@
  */
 
 const MYCELIUM_STEP = 2.2;
-const MYCELIUM_FRAME_INTERVAL = 2; // advance growth once every N frames
+// Growth is paced by elapsed time rather than frame count, and the drawn
+// tip is extended by the fractional step in progress (see
+// myceliumBuildBranchPaths), so it glides smoothly between steps instead of
+// hopping forward a whole step at a time.
+const MYCELIUM_STEPS_PER_SECOND = 30;
+const MYCELIUM_MAX_STEPS_PER_FRAME = 4; // don't lurch forward after a hitch
 const MYCELIUM_ROOT_INTERVAL = 200; // frames between new root sprouts
 const MYCELIUM_MAX_BRANCHES = 50;
 const MYCELIUM_MAX_GENERATION = 3;
@@ -58,16 +63,22 @@ const MYCELIUM_AVOID_OUTLINES = true;
 const MYCELIUM_RESTART_INTERVAL = 25000; // ms of growth before the network resets
 const MYCELIUM_REVEAL_DURATION = 4000; // ms a touched painting takes to fully fade in
 const MYCELIUM_EDGE_SAMPLE_STEP = 4; // px spacing between sampled edge points
+const MYCELIUM_RIBBON_OUTLINE = 1.5; // px added to ribbon widths in place of a stroke
 
 let myceliumBranches = [];
 let myceliumRootTimer = 0;
 let myceliumStartTime = 0;
+let myceliumStepProgress = 0; // fractional steps accumulated, see updateMycelium
+// This frame's painting edge-crawl ribbons, built once in updateMycelium
+// (see myceliumBuildEdgePaths) for every panel's drawMycelium to reuse:
+// [{ fill, path: Path2D }].
+let myceliumEdgePaths = [];
 // Sparse, indexed like getPaintingPolygons(): myceliumPaintingTouch[i] is
 // { at, s0 } - the millis() timestamp mycelium first reached painting i and
 // the arc-length position (see polygonPerimeterInfo) on its perimeter that
 // contact was nearest to - or undefined if it hasn't been touched yet. See
 // myceliumTouchPainting/myceliumPaintingRevealFraction/
-// drawMyceliumPaintingEdges.
+// myceliumBuildEdgePaths.
 let myceliumPaintingTouch = [];
 
 class MyceliumBranch {
@@ -85,7 +96,7 @@ class MyceliumBranch {
     this.forkCooldown = random(30, 70);
     // A little per-branch brightness variation (rather than flat 255) so a
     // tangle of overlapping hyphae reads with some texture instead of as
-    // one flat white mass - see drawMyceliumBranch.
+    // one flat white mass - see myceliumBuildBranchPaths.
     this.brightness = random(200, 255);
   }
 
@@ -184,7 +195,7 @@ class MyceliumBranch {
 // Marks painting `i` as touched on first contact only - later contact while
 // it's already fading in (or after it's fully revealed) is a no-op. Records
 // where on the perimeter contact happened (see polygonPerimeterInfo) so
-// drawMyceliumPaintingEdges can start its own crawl from that same spot.
+// myceliumBuildEdgePaths can start its own crawl from that same spot.
 function myceliumTouchPainting(i, point) {
   if (myceliumPaintingTouch[i]) return;
   const poly = getPaintingPolygons()[i];
@@ -195,8 +206,8 @@ function myceliumTouchPainting(i, point) {
 
 // 0 (untouched) to 1 (fully revealed, MYCELIUM_REVEAL_DURATION after first
 // touch) - read by js/paintings.js's "myceliumReveal" paintingState to
-// crossfade painting `i` from "off" to "filled" (and grow its glow halo),
-// and by drawMyceliumPaintingEdges below to pace that painting's edge-crawl
+// crossfade painting `i` from "off" to "filled",
+// and by myceliumBuildEdgePaths below to pace that painting's edge-crawl
 // so it closes at the same moment.
 function myceliumPaintingRevealFraction(i) {
   const touch = myceliumPaintingTouch[i];
@@ -222,7 +233,7 @@ function myceliumBlocked(p, obstacles) {
 // total perimeter, so a point can be found by (or projected to) a single
 // arc-length coordinate `s` along the boundary - see pointAtPerimeterS/
 // nearestPerimeterS below. Used only by a painting's edge-crawl reveal
-// (myceliumTouchPainting/drawMyceliumPaintingEdges).
+// (myceliumTouchPainting/myceliumBuildEdgePaths).
 function polygonPerimeterInfo(poly) {
   const edges = [];
   let total = 0;
@@ -318,9 +329,10 @@ function myceliumSpawnRoot() {
 }
 
 // A dedicated root just outside painting `poly`'s own bounds, aimed back
-// toward it - prefers its right side (spawning at that side's vertical
-// center, same as the other root spawns' own small vertical/angle jitter)
-// and falls back to the left if the wall doesn't have room to its right.
+// toward it - picks its left or right side at random (spawning at that
+// side's vertical center, same as the other root spawns' own small
+// vertical/angle jitter) and falls back to the other side if the wall
+// doesn't have room on the chosen one.
 // Every painting gets one of these on every initMycelium() (a fresh scene
 // entry or a periodic restart), on top of the plain random edge roots, so
 // a network restart doesn't leave any painting's reveal to chance - it's
@@ -329,8 +341,11 @@ function myceliumSpawnRootNearPainting(poly) {
   const bounds = polygonBounds(poly);
   const margin = random(20, 45);
   const rightX = bounds.x + bounds.w + margin;
-  const spawnRight = rightX <= WALL_BOUNDS.w;
-  const x = spawnRight ? rightX : Math.max(0, bounds.x - margin);
+  const leftX = bounds.x - margin;
+  const hasRight = rightX <= WALL_BOUNDS.w;
+  const hasLeft = leftX >= 0;
+  const spawnRight = hasRight && (!hasLeft || random() < 0.5);
+  const x = spawnRight ? rightX : Math.max(0, leftX);
   const y = bounds.y + bounds.h / 2 + random(-bounds.h * 0.2, bounds.h * 0.2);
   const angle = (spawnRight ? PI : 0) + random(-0.3, 0.3);
   myceliumBranches.push(new MyceliumBranch(x, y, angle, random(9, 15), 0));
@@ -341,6 +356,8 @@ function initMycelium() {
   myceliumPaintingTouch = [];
   myceliumRootTimer = 0;
   myceliumStartTime = millis();
+  myceliumStepProgress = 0;
+  myceliumEdgePaths = [];
   for (let i = 0; i < 5; i++) myceliumSpawnRoot();
   getPaintingPolygons().forEach(myceliumSpawnRootNearPainting);
 }
@@ -354,13 +371,25 @@ function updateMycelium() {
     return;
   }
 
-  if (frameCount % MYCELIUM_FRAME_INTERVAL === 0) {
+  myceliumStepProgress = Math.min(
+    myceliumStepProgress + (deltaTime / 1000) * MYCELIUM_STEPS_PER_SECOND,
+    MYCELIUM_MAX_STEPS_PER_FRAME,
+  );
+  if (myceliumStepProgress >= 1) {
     const paintingPolys = getPaintingPolygons();
     const outlineObstacles = MYCELIUM_AVOID_OUTLINES
       ? myceliumInflatedOutlinePolygons()
       : [];
-    myceliumBranches.forEach((b) => b.step(paintingPolys, outlineObstacles));
+    while (myceliumStepProgress >= 1) {
+      myceliumStepProgress--;
+      myceliumBranches.forEach((b) => b.step(paintingPolys, outlineObstacles));
+    }
   }
+
+  // Geometry is built here, once per frame, rather than in drawMycelium,
+  // which runs once per wall panel (js/wall.js's displayWall()).
+  myceliumBranches.forEach(myceliumBuildBranchPaths);
+  myceliumEdgePaths = myceliumBuildEdgePaths();
 
   myceliumRootTimer++;
   if (
@@ -396,35 +425,65 @@ function myceliumRibbonSides(points, thickness) {
   return { left, right };
 }
 
-function drawMyceliumBranch(pg, branch) {
-  branch.segments.forEach((segment) => {
+// Builds a branch's ribbon (one subpath per wrap segment) and tip nodule
+// as native Path2Ds, filled per panel in drawMycelium - p5 2.0's
+// immediate-mode vertex() is too slow to re-issue every ribbon point once
+// per panel per frame (see js/grass.js's header). A dead branch never
+// changes again, so its paths are built one last time and then kept.
+// Ribbons are widened by MYCELIUM_RIBBON_OUTLINE instead of stroked, which
+// looks the same (the stroke was the fill color) at half the draw calls.
+function myceliumBuildBranchPaths(branch) {
+  if (branch.pathsFinal) return;
+  if (!branch.alive) branch.pathsFinal = true;
+
+  // A live branch's tip is drawn partway toward its next step, along its
+  // current heading, by the fraction of a step that's elapsed.
+  const lastSegment = branch.segments.length - 1;
+  let tip = branch.points[branch.points.length - 1];
+  if (branch.alive) {
+    tip = {
+      x: tip.x + Math.cos(branch.angle) * MYCELIUM_STEP * myceliumStepProgress,
+      y: tip.y + Math.sin(branch.angle) * MYCELIUM_STEP * myceliumStepProgress,
+    };
+  }
+
+  const ribbon = new Path2D();
+  branch.segments.forEach((points, i) => {
+    const segment = branch.alive && i === lastSegment ? [...points, tip] : points;
     if (segment.length < 2) return;
-
-    const { left, right } = myceliumRibbonSides(segment, branch.thickness);
-
-    pg.push();
-    pg.stroke(branch.brightness);
-    pg.strokeWeight(1.5);
-    pg.fill(branch.brightness);
-    pg.beginShape();
-    left.forEach((p) => pg.vertex(p.x, p.y));
-    for (let i = right.length - 1; i >= 0; i--) pg.vertex(right[i].x, right[i].y);
-    pg.endShape(CLOSE);
-    pg.pop();
+    const { left, right } = myceliumRibbonSides(
+      segment,
+      branch.thickness + MYCELIUM_RIBBON_OUTLINE,
+    );
+    myceliumAddRibbon(ribbon, left, right);
   });
 
-  // Bulbous tip nodule where the hypha is actively growing.
+  // Bulbous tip nodule where the hypha is actively growing - its own path,
+  // since its winding could cancel out the ribbon's where they overlap.
+  let nodule = null;
   if (branch.alive) {
-    const tip = branch.points[branch.points.length - 1];
-    pg.noStroke();
-    pg.fill(branch.brightness);
-    pg.circle(tip.x, tip.y, Math.max(2, branch.thickness * 0.5));
+    nodule = new Path2D();
+    nodule.arc(tip.x, tip.y, Math.max(2, branch.thickness * 0.5) / 2, 0, TWO_PI);
   }
+
+  branch.paths = { fill: myceliumGray(branch.brightness), ribbon, nodule };
+}
+
+function myceliumAddRibbon(path, left, right) {
+  path.moveTo(left[0].x, left[0].y);
+  for (let i = 1; i < left.length; i++) path.lineTo(left[i].x, left[i].y);
+  for (let i = right.length - 1; i >= 0; i--) path.lineTo(right[i].x, right[i].y);
+  path.closePath();
+}
+
+function myceliumGray(brightness) {
+  const v = Math.round(brightness);
+  return `rgb(${v}, ${v}, ${v})`;
 }
 
 // Deterministic (same painting index + arc-length `s` -> same value every
 // frame) smooth pseudo-random in [0, 1), via p5's Perlin noise() rather
-// than random() - lets drawMyceliumPaintingEdges recompute each ring's
+// than random() - lets myceliumBuildEdgePaths recompute each ring's
 // whole path fresh every frame straight from the current reveal fraction,
 // with no incremental growth history of its own to store.
 function myceliumEdgeNoise(paintingIndex, s, salt) {
@@ -473,41 +532,33 @@ function myceliumEdgeRibbonSides(points) {
     const len = Math.hypot(dx, dy) || 1;
     const nx = -dy / len;
     const ny = dx / len;
-    const w = p.w / 2;
+    const w = (p.w + MYCELIUM_RIBBON_OUTLINE) / 2;
     left.push({ x: p.x + nx * w, y: p.y + ny * w });
     right.push({ x: p.x - nx * w, y: p.y - ny * w });
   }
   return { left, right };
 }
 
-function drawMyceliumEdgeRibbon(pg, points, brightness) {
-  if (points.length < 2) return;
-  const { left, right } = myceliumEdgeRibbonSides(points);
-  pg.push();
-  pg.stroke(brightness);
-  pg.strokeWeight(1.5);
-  pg.fill(brightness);
-  pg.beginShape();
-  left.forEach((p) => pg.vertex(p.x, p.y));
-  for (let i = right.length - 1; i >= 0; i--) pg.vertex(right[i].x, right[i].y);
-  pg.endShape(CLOSE);
-  pg.pop();
-}
-
 // The "mossy edge" ring: two ribbons crawling from each touched painting's
 // own contact point around its perimeter, one clockwise and one
 // counterclockwise, paced by myceliumPaintingRevealFraction so together
 // they close - meeting on the painting's far side - at the exact moment
-// its fill/glow (js/paintings.js's drawMyceliumRevealPaintings) finish
+// its fill (js/paintings.js's drawMyceliumRevealPaintings) finishes
 // fading in. Drawn as part of the scene layer, same as the branches, so it
 // sits *underneath* drawPaintings()'s own opaque fill - only the portion
 // that wobbles outside the painting's real edge (see myceliumEdgePoints)
 // reads as a mossy border once that fill is drawn on top.
-function drawMyceliumPaintingEdges(pg) {
+//
+// Built as Path2Ds once per frame (see myceliumBuildBranchPaths for why),
+// and a fully closed ring is kept on its touch record rather than
+// resampled every frame, since it no longer changes.
+function myceliumBuildEdgePaths() {
   const polygons = getPaintingPolygons();
+  const paths = [];
   myceliumPaintingTouch.forEach((touch, i) => {
     const poly = polygons[i];
     if (!touch || !poly) return;
+    if (touch.closedPath) return paths.push(touch.closedPath);
 
     const fraction = myceliumPaintingRevealFraction(i);
     const info = polygonPerimeterInfo(poly);
@@ -515,20 +566,34 @@ function drawMyceliumPaintingEdges(pg) {
     const halfDist = (fraction * info.perimeter) / 2;
     const brightness = 200 + myceliumEdgeNoise(i, 0, 99) * 55;
 
-    drawMyceliumEdgeRibbon(
-      pg,
-      myceliumEdgePoints(info, centroid, touch.s0, halfDist, 1, i, 0),
-      brightness,
-    );
-    drawMyceliumEdgeRibbon(
-      pg,
-      myceliumEdgePoints(info, centroid, touch.s0, halfDist, -1, i, 1),
-      brightness,
-    );
+    const path = new Path2D();
+    [1, -1].forEach((direction, salt) => {
+      const points = myceliumEdgePoints(
+        info, centroid, touch.s0, halfDist, direction, i, salt,
+      );
+      if (points.length < 2) return;
+      const { left, right } = myceliumEdgeRibbonSides(points);
+      myceliumAddRibbon(path, left, right);
+    });
+    const entry = { fill: myceliumGray(brightness), path };
+    if (fraction >= 1) touch.closedPath = entry;
+    paths.push(entry);
   });
+  return paths;
 }
 
 function drawMycelium(pg) {
-  myceliumBranches.forEach((b) => drawMyceliumBranch(pg, b));
-  drawMyceliumPaintingEdges(pg);
+  const ctx = pg.drawingContext;
+  ctx.save();
+  myceliumBranches.forEach(({ paths }) => {
+    if (!paths) return;
+    ctx.fillStyle = paths.fill;
+    ctx.fill(paths.ribbon);
+    if (paths.nodule) ctx.fill(paths.nodule);
+  });
+  myceliumEdgePaths.forEach(({ fill, path }) => {
+    ctx.fillStyle = fill;
+    ctx.fill(path);
+  });
+  ctx.restore();
 }
