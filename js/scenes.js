@@ -56,7 +56,7 @@
  * live, in the shared vocabulary from js/lightState.js ("filled",
  * "outline", "off", or a pulse/switch descriptor between them) plus the
  * spotlight/animated painting-only modes from js/paintings.js ("sequence",
- * "random", "randomOutline", "curtain", "curtainVertical", "wipe",
+ * "random", "randomOutline", "curtain", "curtainVertical", "curtainDown", "wipe",
  * "wipeDown", "pulse", "groupPulse", "lookin", "lookinTv").
  * Neither field is required: a scene that omits one gets
  * LIGHT_STATE_DEFAULT ("filled" -
@@ -129,9 +129,9 @@ const SCENES = [
     },
     // butterflyState omitted -> defaults to "filled", so the sculptures
     // stay solid white while the ripples play on top.
-    // paintingState omitted -> also defaults to "filled", matching what
-    // "emanatePaintings" sets explicitly below - relevant here on the
+    // Explicit, matching "emanatePaintings" below - relevant here on the
     // fallback wall, where the ripples play on the paintings instead.
+    paintingState: "filled",
   },
   {
     name: "emanatePaintings",
@@ -212,6 +212,8 @@ const SCENES = [
     init: initFluidFall,
     update: updateFluidFall,
     draw: drawFluidFall, // js/fluidFall.js - shader-based
+    // Paintings fill from the top down, like the fluid falling onto them.
+    paintingState: "curtainDown",
   },
   {
     name: "reactionDiffusion",

@@ -172,6 +172,7 @@ const PAINTING_LIGHT_OVERRIDES = [
   "randomOutline",
   "curtain",
   "curtainVertical",
+  "curtainDown",
   "wipe",
   "wipeDown",
   "wipeRadial",
@@ -246,7 +247,8 @@ function paintingHash(i, salt) {
 // holding closed before the next group's turn - like a theater curtain, but
 // widening instead of parting. "curtain" expands horizontally from the
 // vertical centerline (full width); "curtainVertical" expands vertically from
-// the horizontal centerline (full height) instead.
+// the horizontal centerline (full height) instead. ("curtainDown" is a
+// different animal - see its own note below.)
 const PAINTING_CURTAIN_OPEN = 1.2; // seconds to fully open
 const PAINTING_CURTAIN_HOLD = 8; // seconds held fully open
 const PAINTING_CURTAIN_CLOSE = 1.2; // seconds to fully close
@@ -348,6 +350,71 @@ function drawCurtainPaintings(pg, polygons) {
 
 function drawCurtainVerticalPaintings(pg, polygons) {
   drawCurtainPaintingsUsing(pg, polygons, curtainPolygonVertical);
+}
+
+// "curtainDown": white pours down each painting like fluid - the lit
+// region's bottom edge falls from the top of the painting to the bottom,
+// holds, then its top edge falls too, draining out the bottom, so the white
+// only ever moves downward. Each painting's pour is delayed by how far down
+// the wall it sits (centroid y, normalized like "wipeDown"), up to
+// PAINTING_CURTAIN_DOWN_STAGGER for the lowest one, so the pours cascade
+// top row -> middle -> bottom. Unlike "curtain" this doesn't use the
+// PULSE_GROUPS relay, so no painting sits dark waiting for other groups'
+// turns - just a short PAINTING_CURTAIN_DOWN_GAP between pours.
+const PAINTING_CURTAIN_DOWN_FILL = 1.5; // seconds for the white to pour down
+const PAINTING_CURTAIN_DOWN_HOLD = 4; // seconds held fully lit
+const PAINTING_CURTAIN_DOWN_DRAIN = 1.5; // seconds for the top edge to fall away
+const PAINTING_CURTAIN_DOWN_GAP = 1.5; // seconds dark before the next pour
+const PAINTING_CURTAIN_DOWN_STAGGER = 2.5; // seconds from the top painting's pour to the bottom one's
+const PAINTING_CURTAIN_DOWN_BASE_PERIOD =
+  PAINTING_CURTAIN_DOWN_FILL +
+  PAINTING_CURTAIN_DOWN_HOLD +
+  PAINTING_CURTAIN_DOWN_DRAIN +
+  PAINTING_CURTAIN_DOWN_GAP;
+
+// Lit band right now as { top, bottom }, each 0 (the painting's top edge) to
+// 1 (its bottom edge), or null while it's dark, for a painting at wall
+// position `pos` - 0 (topmost painting) to 1 (bottommost).
+function curtainDownBand(pos) {
+  const period = PAINTING_CURTAIN_DOWN_BASE_PERIOD;
+  const delayed = millis() / 1000 - pos * PAINTING_CURTAIN_DOWN_STAGGER;
+  const t = ((delayed % period) + period) % period;
+
+  const fillEnd = PAINTING_CURTAIN_DOWN_FILL;
+  const holdEnd = fillEnd + PAINTING_CURTAIN_DOWN_HOLD;
+  const drainEnd = holdEnd + PAINTING_CURTAIN_DOWN_DRAIN;
+
+  if (t < fillEnd) return { top: 0, bottom: t / fillEnd };
+  if (t < holdEnd) return { top: 0, bottom: 1 };
+  if (t < drainEnd) return { top: (t - holdEnd) / (drainEnd - holdEnd), bottom: 1 };
+  return null;
+}
+
+// The slice of quad `poly` between `top` and `bottom`, measured down each
+// of its own left/right edges so it follows a corner-pinned painting's
+// shape. Same TL, TR, BR, BL corner order as curtainPolygon() above.
+function paintingBandPolygon(poly, top, bottom) {
+  const [tl, tr, br, bl] = poly;
+  const along = (a, b, f) => ({ x: lerpValue(a.x, b.x, f), y: lerpValue(a.y, b.y, f) });
+  return [along(tl, bl, top), along(tr, br, top), along(tr, br, bottom), along(tl, bl, bottom)];
+}
+
+function drawCurtainDownPaintings(pg, polygons) {
+  const offState = resolveLightState("off");
+  const litState = resolveLightState("filled");
+  const ys = polygons.map((poly) => polygonCentroid(poly).y);
+  const minY = Math.min(...ys);
+  const span = Math.max(Math.max(...ys) - minY, 1);
+  polygons.forEach((poly, i) => {
+    // Opaque black base first - see drawCurtainPaintingsUsing().
+    drawLightShape(pg, poly, offState, { strokeWeight: 9 });
+    const band = curtainDownBand((ys[i] - minY) / span);
+    if (band && band.bottom - band.top > 0.001) {
+      drawLightShape(pg, paintingBandPolygon(poly, band.top, band.bottom), litState, {
+        strokeWeight: 9,
+      });
+    }
+  });
 }
 
 // "random"/"randomOutline": every painting independently fades between a
@@ -731,6 +798,7 @@ function drawPaintings(pg) {
   if (stateValue === "curtain") return drawCurtainPaintings(pg, polygons);
   if (stateValue === "curtainVertical")
     return drawCurtainVerticalPaintings(pg, polygons);
+  if (stateValue === "curtainDown") return drawCurtainDownPaintings(pg, polygons);
   if (stateValue === "random") return drawRandomPaintings(pg, polygons);
   if (stateValue === "randomOutline")
     return drawRandomOutlinePaintings(pg, polygons);
