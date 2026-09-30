@@ -204,26 +204,39 @@ function drawLookinPart(ctx, part, localT) {
   ctx.restore();
 }
 
-// Fits the text inside the painting's quad, centered on its centroid and
-// following the quad's average edge directions (so it tilts/shears with a
-// corner-pinned painting). A 2D canvas can only do affine transforms, so this
-// is a parallelogram approximation of the quad rather than a true
+// A painting quad's own frame: its centroid `c`, unit vectors `ex`/`ey`
+// along its average top/bottom and side edge directions, and its average
+// width/height `exLen`/`eyLen`. A 2D canvas can only do affine transforms,
+// so this is a parallelogram approximation of the quad rather than a true
 // perspective warp - plenty for the near-rectangular quads it runs on.
 // Relies on poly being the quad's four corners in p5.mapper order: TL, TR,
-// BR, BL.
-function drawLookinText(pg, poly, writeT) {
-  if (!lookinArt) return;
+// BR, BL. Shared with js/lookinTv.js.
+function paintingAffineFrame(poly) {
   const [tl, tr, br, bl] = poly;
   const ex = { x: (tr.x - tl.x + br.x - bl.x) / 2, y: (tr.y - tl.y + br.y - bl.y) / 2 };
   const ey = { x: (bl.x - tl.x + br.x - tr.x) / 2, y: (bl.y - tl.y + br.y - tr.y) / 2 };
   const exLen = Math.hypot(ex.x, ex.y) || 1;
   const eyLen = Math.hypot(ey.x, ey.y) || 1;
+  return {
+    ex: { x: ex.x / exLen, y: ex.y / exLen },
+    ey: { x: ey.x / eyLen, y: ey.y / eyLen },
+    exLen,
+    eyLen,
+    c: polygonCentroid(poly),
+  };
+}
+
+// Fits the text inside the painting's quad, centered on its centroid and
+// following its paintingAffineFrame() (so it tilts/shears with a
+// corner-pinned painting).
+function drawLookinText(pg, poly, writeT) {
+  if (!lookinArt) return;
+  const { ex, ey, exLen, eyLen, c } = paintingAffineFrame(poly);
   const s = Math.min((exLen * LOOKIN_FIT_WIDTH) / lookinArt.w, (eyLen * LOOKIN_FIT_HEIGHT) / lookinArt.h);
-  const c = polygonCentroid(poly);
 
   const ctx = pg.drawingContext;
   ctx.save();
-  ctx.transform((ex.x / exLen) * s, (ex.y / exLen) * s, (ey.x / eyLen) * s, (ey.y / eyLen) * s, c.x, c.y);
+  ctx.transform(ex.x * s, ex.y * s, ey.x * s, ey.y * s, c.x, c.y);
   ctx.translate(-lookinArt.w / 2, -lookinArt.h / 2);
   ctx.fillStyle = "#fff";
   lookinArt.parts.forEach((part) => drawLookinPart(ctx, part, writeT - part.start));

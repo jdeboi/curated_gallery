@@ -159,6 +159,8 @@ function drawPolygon(pg, poly, { fillColor, strokeColor, weight } = {}) {
 //
 // "lookin" writes the "I SEE YOU LOOKIN" lettering across each dark painting
 // one letter at a time before fading it up to lit - see js/lookin.js.
+// "lookinTv" powers the paintings on one by one onto TV static first, then
+// writes the lettering on all of them at once - see js/lookinTv.js.
 const PAINTING_LIGHT_OVERRIDES = [
   "auto",
   "filled",
@@ -177,6 +179,7 @@ const PAINTING_LIGHT_OVERRIDES = [
   "pulse",
   "groupPulse",
   "lookin",
+  "lookinTv",
 ];
 let paintingLightOverride = "auto";
 const PAINTING_SPOTLIGHT_PERIOD = 1.5; // seconds between steps
@@ -742,6 +745,7 @@ function drawPaintings(pg) {
   if (stateValue === "pulse") return drawPulsePaintings(pg, polygons);
   if (stateValue === "groupPulse") return drawGroupPulsePaintings(pg, polygons);
   if (stateValue === "lookin") return drawLookinPaintings(pg, polygons); // js/lookin.js
+  if (stateValue === "lookinTv") return drawLookinTvPaintings(pg, polygons); // js/lookinTv.js
 
   const resolved = resolveLightState(stateValue);
 

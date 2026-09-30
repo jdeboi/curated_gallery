@@ -121,6 +121,7 @@ function setup() {
   loadStarFlowerSprite(); // js/stars.js
   loadJasmineSprites(); // js/jasmine.js
   loadLookinText(); // js/lookin.js
+  loadLookinTvStatic(); // js/lookinTv.js
   loadLookinFaces(); // js/lookinFaces.js
 
   // create mapper object

@@ -57,7 +57,7 @@
  * "outline", "off", or a pulse/switch descriptor between them) plus the
  * spotlight/animated painting-only modes from js/paintings.js ("sequence",
  * "random", "randomOutline", "curtain", "curtainVertical", "wipe",
- * "wipeDown", "pulse", "groupPulse", "lookin").
+ * "wipeDown", "pulse", "groupPulse", "lookin", "lookinTv").
  * Neither field is required: a scene that omits one gets
  * LIGHT_STATE_DEFAULT ("filled" -
  * everything illuminated), which is why plain scenes below don't set them
@@ -261,6 +261,18 @@ const SCENES = [
     // Each painting has "I SEE YOU LOOKIN" written across it, letter by
     // letter, before it fades up to lit - each painting on its own random timer.
     paintingState: "lookin",
+    butterflyState: "off",
+  },
+  {
+    name: "lookinTv",
+    duration: 45000,
+    init: initLookinTv, // js/lookinTv.js - restarts the power-on sequence
+    update: () => {},
+    draw: (pg) => pg.background(0),
+    // Paintings power on one at a time like old TVs onto static, the static
+    // fades out on all of them together, "I SEE YOU LOOKIN" is written across
+    // them, then each carries on through the "lookin" loop on its own timer.
+    paintingState: "lookinTv",
     butterflyState: "off",
   },
   // Painting-choreography scene: a plain black field so its painting mode
