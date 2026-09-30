@@ -23,10 +23,17 @@
  * Deliberately NOT included in js/parenting.js's lockable surfaces, for the
  * same reason - a mask is never expressed relative to a panel's local space
  * the way paintingMaps/butterflyMaps are.
+ *
+ * mirrorMaskMaps (js/mirrorMasks.js) are plain PolyMaps too and get exactly
+ * this same always-opaque-black treatment - a mirror must never be lit no
+ * matter what scene is playing - so they're folded into this same overlay
+ * rather than duplicating it. What makes them different from a plain mask
+ * (spinner stars, an outside-drawn outline in emanate/mycelium) is drawn
+ * separately, earlier in the frame, in js/mirrorMasks.js.
  */
 
 function getMaskPolygons() {
-  return maskMaps.map((mask) =>
+  return maskMaps.concat(mirrorMaskMaps).map((mask) =>
     mask.points.map((cp) => ({ x: mask.x + cp.x, y: mask.y + cp.y })),
   );
 }

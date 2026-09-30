@@ -127,13 +127,16 @@ function isGlowMode(state) {
 // growing, fading copies of the same polygon offset from its centroid.
 // Shared by paintings (js/paintings.js) and wing sculptures
 // (js/outlines.js) so both render through the same glow look rather than
-// each having its own bespoke halo.
-function drawGlow(pg, poly) {
+// each having its own bespoke halo. `intensity` (0-1) scales every ring's
+// alpha - lets a caller fade the halo in over time (e.g. js/paintings.js's
+// "myceliumReveal" mode growing it in step with that painting's own
+// crossfade) instead of it only ever being fully on or absent.
+function drawGlow(pg, poly, intensity = 1) {
   const centroid = polygonCentroid(poly);
   const numRings = 4;
   for (let r = numRings; r >= 1; r--) {
     const scale = 1 + r * 0.12;
-    const alpha = 40 * (1 - r / (numRings + 1));
+    const alpha = 40 * (1 - r / (numRings + 1)) * intensity;
     const ringPoly = poly.map((p) => ({
       x: centroid.x + (p.x - centroid.x) * scale,
       y: centroid.y + (p.y - centroid.y) * scale,
@@ -153,9 +156,13 @@ function drawGlow(pg, poly) {
 // corner, so it's floored at 0.35 (capping the move at ~2.9x dist) rather
 // than left to spike arbitrarily - fine for the near-rectangular quads and
 // gently-curved silhouettes this runs on.
+//
+// A negative `dist` pushes outward instead of inward (see outsetPolygon
+// below) - the same mitered-normal math works either direction, it's just a
+// sign flip on how far along that normal each vertex moves.
 function insetPolygon(poly, dist) {
   const n = poly.length;
-  if (n < 3 || dist <= 0) return poly;
+  if (n < 3 || dist === 0) return poly;
 
   let area = 0;
   for (let i = 0; i < n; i++) {
@@ -191,6 +198,17 @@ function insetPolygon(poly, dist) {
     const miter = dist / Math.max(cosHalf, 0.35);
     return { x: p.x + bx * miter, y: p.y + by * miter };
   });
+}
+
+// Pushes poly outward by `dist` instead of shrinking it inward - used by
+// js/mirrorMasks.js so a mirror mask's "outline mode" stroke sits just
+// outside its blackout shape rather than inside it like paintings/outlines'
+// own "outline" state (drawLightShape below): the mask itself must stay
+// fully opaque black (it's covering a mirror, not something to light up),
+// so the stroke has to live entirely outside that fill to read as anything
+// but a plain black shape.
+function outsetPolygon(poly, dist) {
+  return insetPolygon(poly, -dist);
 }
 
 // Renders poly filled/outlined/off (or any crossfade between them) per

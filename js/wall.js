@@ -261,6 +261,7 @@ function displayWall() {
     paintingMaps.forEach((pm) => pm.displaySketch(() => {}));
     butterflyMaps.forEach((bm) => bm.displaySketch(() => {}));
     maskMaps.forEach((mm) => mm.displaySketch(() => {}));
+    mirrorMaskMaps.forEach((mm) => mm.displaySketch(() => {}));
   }
 }
 
@@ -329,7 +330,9 @@ function drawSurfaceLabels() {
     ...paintingMaps,
     ...butterflyMaps,
     ...maskMaps,
+    ...mirrorMaskMaps,
     ...bezierMaskMaps,
+    ...eyesMaps,
   ];
 
   push();

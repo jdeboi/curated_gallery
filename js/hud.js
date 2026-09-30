@@ -3,8 +3,10 @@
  * independently-positioned text() calls scattered down the corner. Each
  * status line is sourced from the file that owns that state
  * (sceneStatusLine() - js/scenes.js, paintingModeStatusLine() -
- * js/paintings.js, parentingStatusLine() - js/parenting.js) so this file
- * only owns the layout/styling, not the data.
+ * js/paintings.js, parentingStatusLine() - js/parenting.js,
+ * mirrorMaskEffectsStatusLine() - js/mirrorMasks.js,
+ * faceEyesStatusLine() - js/faceEyes.js) so this file only owns
+ * the layout/styling, not the data.
  */
 
 const HUD_X = 15;
@@ -13,7 +15,7 @@ const HUD_PADDING = 12;
 const HUD_LINE_HEIGHT = 24;
 const HUD_TEXT_SIZE = 16;
 const HUD_HINT_TEXT_SIZE = 12;
-const HUD_HINT = "arrows/space: scene    w: painting mode    q: butterfly mode    p: parenting    c: calibrate    h: hud";
+const HUD_HINT = "arrows/space: scene    w: painting mode    q: butterfly mode    p: parenting    m: mirror fx    e: eyes    c: calibrate    h: hud";
 
 // "h" toggles this off entirely (see keyPressed() in each wall's sketch.js) -
 // e.g. for taking a clean screenshot/video of the show with no overlay text.
@@ -31,6 +33,8 @@ function displayHUD() {
     sceneStatusLine(), // js/scenes.js
     paintingModeStatusLine(), // js/paintings.js
     parentingStatusLine(), // js/parenting.js
+    mirrorMaskEffectsStatusLine(), // js/mirrorMasks.js
+    faceEyesStatusLine(), // js/faceEyes.js
   ];
 
   const panelWidth = 460;

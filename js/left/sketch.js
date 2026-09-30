@@ -45,12 +45,35 @@ const OUTLINE_SPECS = [
   },
 ];
 
+// "groupPulse" (js/paintings.js + js/outlines.js): which paintings/outlines
+// take a turn together, one group at a time - fades in, holds, fades out,
+// then the next group's turn starts, cycling. Indices are plain declaration
+// order into PAINTING_SPECS/OUTLINE_SPECS above (0-based), not the on-screen
+// surface-label ids (which additionally count the wall panel(s) ahead of
+// them). Anything not listed in any group just stays off for the whole
+// scene. Left wall's wing sculptures (bird + both butterflies) share one
+// group here even though they're visually distinct pieces.
+const PULSE_GROUPS = [
+  { paintings: [0, 1, 3, 4] },
+  { outlines: [0, 1, 2] },
+  { paintings: [2] },
+];
+
 // One entry per blackout mask - a freeform polygon painted solid black,
 // drawn as a screen-space overlay on top of every panel (see js/masks.js).
 // `numPoints` sets how many draggable vertices it starts with - drag them
 // during calibration (press "c") to trace the exact area to cover. See
 // js/right/sketch.js's own MASK_SPECS for more on the convention.
-const MASK_SPECS = [{ numPoints: 11 }];
+const MASK_SPECS = [];
+
+// A mirror mask (js/mirrorMasks.js): same freeform blackout PolyMap as
+// MASK_SPECS above, but calibrated over a mirror rather than exposed wall -
+// so instead of just staying invisible, it gets stars circling it in
+// "spinner" and an outside-drawn outline in "emanate"/"mycelium" rather than
+// ever being lit. This was surface id 9 (a plain MASK_SPECS entry) before
+// that conversion - kept as the sole/first PolyMap created in setup() below
+// so it keeps that same id and its existing maps/left/map.json calibration.
+const MIRROR_MASK_SPECS = [{ numPoints: 11 }];
 
 // Same idea as MASK_SPECS, but a smooth freeform BezierMap instead of a
 // straight-edged PolyMap - see js/right/sketch.js's BEZIER_MASK_SPECS.
@@ -62,10 +85,17 @@ const BEZIER_MASK_SPECS = [];
 // the solid-fill painting/outline reference quads).
 const WALL_PANEL_RES = 16;
 
+// Blinking eyes over a face sculpture (js/faceEyes.js) - one small
+// corner-pinned QuadMap per entry, both eyes side by side inside it. `w`/`h`
+// are the buffer size in px, so keep the aspect roughly that of the eye
+// region on the sculpture. Hidden entirely until "e" toggles it on.
+const EYES_SPECS = [];
+
 let pMapper;
 let paintingMaps = [];
 let butterflyMaps = [];
 let maskMaps = [];
+let mirrorMaskMaps = [];
 let bezierMaskMaps = [];
 
 let myFont;
@@ -123,12 +153,23 @@ function setup() {
     pMapper.createQuadMap(spec.width, spec.height, 2, 2),
   );
 
-  maskMaps = MASK_SPECS.map((spec) => pMapper.createPolyMap(spec.numPoints));
-  spreadDefaultPositions(maskMaps, {
+  // Created before maskMaps (empty on left wall) so this stays the first
+  // PolyMap created - see MIRROR_MASK_SPECS above for why that matters.
+  mirrorMaskMaps = MIRROR_MASK_SPECS.map((spec) =>
+    pMapper.createPolyMap(spec.numPoints),
+  );
+  spreadDefaultPositions(mirrorMaskMaps, {
     originX: -900,
     originY: -350,
     spacing: 40,
   });
+
+  maskMaps = MASK_SPECS.map((spec) => pMapper.createPolyMap(spec.numPoints));
+
+  // Created after every other surface so it doesn't shift any existing
+  // QuadMap's saved calibration - see js/faceEyes.js.
+  createFaceEyes(pMapper, EYES_SPECS);
+  spreadDefaultPositions(eyesMaps, { originX: -80, originY: -30 });
 
   initShow();
 
@@ -160,6 +201,7 @@ function draw() {
   updateShow();
   displayWall();
   drawBlackoutMasksOverlay();
+  drawFaceEyesOverlay(); // js/faceEyes.js - on top of the masks too
   drawSurfaceLabels();
 
   // Drawn last so it always sits on top of the wall content instead of
@@ -202,6 +244,12 @@ function keyPressed() {
       break;
     case "b":
       showWallImage = !showWallImage;
+      break;
+    case "m":
+      toggleMirrorMaskEffects(); // js/mirrorMasks.js
+      break;
+    case "e":
+      toggleFaceEyes(); // js/faceEyes.js
       break;
     case "ArrowRight":
       nextScene();

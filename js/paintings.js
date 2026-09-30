@@ -122,43 +122,54 @@ function drawPolygon(pg, poly, { fillColor, strokeColor, weight } = {}) {
 // "outline") without needing to sit through a specific scene - "auto"
 // (the default) defers back to whatever the current scene declares.
 //
-// "sequence", "column", and "row" are spotlight modes: unlike the other
-// states (which apply the same resolved look to every painting), these
-// light up a moving *subset* of paintings - the rest "off" - stepping every
-// PAINTING_SPOTLIGHT_PERIOD (or PAINTING_GROUP_PERIOD) seconds:
-//   - "sequence" slides a PAINTING_SEQUENCE_FRACTION-sized window over the
-//     paintingMaps in their plain index order, so the lit band visibly
-//     travels down the wall.
-//   - "column"/"row" light up one whole column/row at a time (paintings
-//     grouped by physical position - see computePaintingGroups() below),
-//     stepping to the next column/row in wall order, so the lit band
-//     sweeps across (column) or down (row) the wall.
-// All three are handled specially in drawPaintings() below since they need
-// the painting count/order, not just a single resolved state.
+// "sequence" is a spotlight mode: unlike the other states (which apply the
+// same resolved look to every painting), it lights up a moving *subset* of
+// paintings - the rest "off" - sliding a PAINTING_SEQUENCE_FRACTION-sized
+// window over the paintingMaps in their plain index order every
+// PAINTING_SPOTLIGHT_PERIOD seconds, so the lit band visibly travels down
+// the wall. Handled specially in drawPaintings() below since it needs the
+// painting count/order, not just a single resolved state.
 //
-// "random" shares the "curtain" mode's own per-painting on/off timing (same
-// PAINTING_CURTAIN_* durations, same jittered period + phase offset per
-// painting via curtainOpenFraction()) rather than a shared stepped window -
-// each painting just fades between "off" and "filled" as its own fraction
-// rises and falls, so it needs no group/order bookkeeping of its own and
-// naturally looks random since every painting runs on an independent timer.
+// "myceliumReveal" (the mycelium scene's own paintingState) is driven by
+// js/mycelium.js instead of a timer: every painting starts "off" and
+// crossfades to "filled" over MYCELIUM_REVEAL_DURATION once mycelium first
+// grows into its silhouette (myceliumPaintingRevealFraction) - see
+// drawMyceliumRevealPaintings() below.
 //
-// "curtain", "wipe", and "pulse" are per-painting animated modes - each
-// paints its own polygon per painting (curtain/pulse offset so paintings
-// don't move in lockstep; wipe travels left-to-right across all of them at
-// once) rather than resolving one state for every painting alike.
+// "random"/"randomOutline" run each painting's own on/off timing via
+// curtainOpenFraction() - same PAINTING_CURTAIN_* durations as "curtain"
+// below, but each painting gets its own jittered period + phase offset
+// rather than a shared schedule - each painting just fades between a low
+// state ("off" for "random", "outline" for "randomOutline") and "filled" as
+// its own fraction rises and falls, so it needs no group/order bookkeeping
+// of its own and naturally looks random since every painting runs on an
+// independent timer.
+//
+// "wipe", "wipeDown", and "pulse" are per-painting animated modes - each
+// paints its own polygon per painting (pulse offset so paintings don't move
+// in lockstep; wipe/wipeDown travel across all of them at once, left-to-right
+// and top-to-bottom respectively) rather than resolving one state for every
+// painting alike. "curtain"/"curtainVertical" and "groupPulse" are
+// group-based instead: paintings (and, per PULSE_GROUPS, wing sculptures too,
+// for "groupPulse") take turns by wall-declared group rather than
+// individually - "curtain" adds the expand/collapse animation on top of that
+// same group relay; "groupPulse" is a plain crossfade - see
+// drawCurtainPaintingsUsing()/drawGroupPulsePaintings() below.
 const PAINTING_LIGHT_OVERRIDES = [
   "auto",
   "filled",
   "outline",
   "off",
   "sequence",
+  "myceliumReveal",
   "random",
-  "column",
-  "row",
+  "randomOutline",
   "curtain",
+  "curtainVertical",
   "wipe",
+  "wipeDown",
   "pulse",
+  "groupPulse",
 ];
 let paintingLightOverride = "auto";
 const PAINTING_SPOTLIGHT_PERIOD = 1.5; // seconds between steps
@@ -190,67 +201,15 @@ function paintingModeStatusLine() {
 }
 
 function isSpotlightMode(state) {
-  return state === "sequence" || state === "column" || state === "row";
-}
-
-// Groups painting indices by physical position along `axis` ("x" for
-// columns, "y" for rows) - two paintings land in the same group when their
-// centroids are within half the average painting size along that axis, so
-// a real grid of paintings clusters into its actual columns/rows without
-// needing that layout declared by hand anywhere. Read fresh off
-// getPaintingPolygons()/getPaintingBounds() each call rather than cached -
-// cheap relative to the polygon math those already cache, and only ever
-// called from the "column"/"row" branch below (at most a couple of times a
-// frame, never the many-panels-times-many-paintings fan-out that made
-// getPaintingPolygons() itself worth caching).
-function computePaintingGroups(axis) {
-  const polygons = getPaintingPolygons();
-  if (polygons.length === 0) return [];
-
-  const bounds = getPaintingBounds();
-  const centroids = polygons.map(polygonCentroid);
-  const avgSize =
-    bounds.reduce((sum, b) => sum + (axis === "x" ? b.w : b.h), 0) /
-    bounds.length;
-  const threshold = avgSize * 0.5;
-
-  const order = centroids
-    .map((c, i) => ({ i, v: axis === "x" ? c.x : c.y }))
-    .sort((a, b) => a.v - b.v);
-
-  const groups = [];
-  order.forEach(({ i, v }) => {
-    const last = groups[groups.length - 1];
-    if (last && v - last.v < threshold) {
-      last.indices.push(i);
-      last.v = v;
-    } else {
-      groups.push({ v, indices: [i] });
-    }
-  });
-  return groups.map((g) => g.indices);
-}
-
-const PAINTING_GROUP_PERIOD = 1.8; // seconds a column/row stays lit before the next
-
-// Returns the Set of painting indices in whichever column/row is lit this
-// frame - one group at a time, in physical order, wrapping around.
-function groupLitIndices(axis) {
-  const groups = computePaintingGroups(axis);
-  if (groups.length === 0) return new Set();
-  const slot = Math.floor(millis() / (PAINTING_GROUP_PERIOD * 1000));
-  return new Set(groups[slot % groups.length]);
+  return state === "sequence";
 }
 
 // Returns the Set of painting indices lit this frame: a
 // PAINTING_SEQUENCE_FRACTION-wide band that slides one step per
 // PAINTING_SPOTLIGHT_PERIOD through the paintings in plain index order,
-// wrapping around. ("column"/"row" delegate to groupLitIndices() instead;
-// "random" doesn't come through here at all - see drawRandomPaintings().)
-function spotlightLitIndices(mode, count) {
-  if (mode === "column" || mode === "row") {
-    return groupLitIndices(mode === "column" ? "x" : "y");
-  }
+// wrapping around. ("random" doesn't come through here at all - see
+// drawRandomPaintings().)
+function spotlightLitIndices(count) {
   if (count <= 0) return new Set();
   const slot = Math.floor(millis() / (PAINTING_SPOTLIGHT_PERIOD * 1000));
   const windowSize = Math.max(1, Math.round(count * PAINTING_SEQUENCE_FRACTION));
@@ -270,14 +229,14 @@ function paintingHash(i, salt) {
   return s - Math.floor(s);
 }
 
-// "curtain": each painting opens/closes independently, expanding
-// horizontally from its own vertical centerline out to full width, holding
-// lit, then collapsing back to that centerline and holding closed - like a
-// theater curtain, but widening instead of parting. Every painting runs its
-// own cycle length (jittered +/-30% via paintingHash) and starts at its own
-// random point in that cycle, so they open/close at "random intervals
-// relative to one another" per the ask, and since their periods differ
-// they keep drifting out of step rather than ever settling into sync.
+// "curtain"/"curtainVertical": paintings open/close by wall-declared
+// PULSE_GROUPS turn (same group relay as "groupPulse" - see
+// groupPulseFractionFor() below), expanding from their shared centerline out
+// to full size, holding lit, then collapsing back to that centerline and
+// holding closed before the next group's turn - like a theater curtain, but
+// widening instead of parting. "curtain" expands horizontally from the
+// vertical centerline (full width); "curtainVertical" expands vertically from
+// the horizontal centerline (full height) instead.
 const PAINTING_CURTAIN_OPEN = 1.2; // seconds to fully open
 const PAINTING_CURTAIN_HOLD = 8; // seconds held fully open
 const PAINTING_CURTAIN_CLOSE = 1.2; // seconds to fully close
@@ -290,10 +249,15 @@ const PAINTING_CURTAIN_BASE_PERIOD =
 
 // Returns how open painting `i`'s curtain is right now: 0 (fully collapsed
 // to its centerline) to 1 (fully open).
-function curtainOpenFraction(i) {
-  const jitter = 0.7 + paintingHash(i, 1) * 0.6; // 0.7x - 1.3x this painting's period
+// `salt` decorrelates one index space from another sharing this same
+// function - js/outlines.js's "random" wing-sculpture mode passes
+// BUTTERFLY_RANDOM_SALT so butterfly index 0 doesn't land on the exact same
+// jitter/phase as painting index 0.
+function curtainOpenFraction(i, salt = 0) {
+  const key = i + salt;
+  const jitter = 0.7 + paintingHash(key, 1) * 0.6; // 0.7x - 1.3x this painting's period
   const period = PAINTING_CURTAIN_BASE_PERIOD * jitter;
-  const phaseOffset = paintingHash(i, 2) * period;
+  const phaseOffset = paintingHash(key, 2) * period;
   const t = (millis() / 1000 + phaseOffset) % period;
 
   const openEnd = PAINTING_CURTAIN_OPEN * jitter;
@@ -333,7 +297,25 @@ function curtainPolygon(poly, fraction) {
   ];
 }
 
-function drawCurtainPaintings(pg, polygons) {
+// Same idea as curtainPolygon() above but collapsing toward the left/right
+// edges' midpoints instead of the top/bottom ones, so the painting narrows
+// vertically toward its horizontal centerline rather than horizontally
+// toward its vertical one.
+function curtainPolygonVertical(poly, fraction) {
+  const [tl, tr, br, bl] = poly;
+  const leftMid = { x: lerpValue(tl.x, bl.x, 0.5), y: lerpValue(tl.y, bl.y, 0.5) };
+  const rightMid = { x: lerpValue(tr.x, br.x, 0.5), y: lerpValue(tr.y, br.y, 0.5) };
+  return [
+    { x: lerpValue(leftMid.x, tl.x, fraction), y: lerpValue(leftMid.y, tl.y, fraction) },
+    { x: lerpValue(rightMid.x, tr.x, fraction), y: lerpValue(rightMid.y, tr.y, fraction) },
+    { x: lerpValue(rightMid.x, br.x, fraction), y: lerpValue(rightMid.y, br.y, fraction) },
+    { x: lerpValue(leftMid.x, bl.x, fraction), y: lerpValue(leftMid.y, bl.y, fraction) },
+  ];
+}
+
+// Shared by drawCurtainPaintings/drawCurtainVerticalPaintings below - only
+// `collapsePolygon` differs between the horizontal and vertical variants.
+function drawCurtainPaintingsUsing(pg, polygons, collapsePolygon) {
   const offState = resolveLightState("off");
   const litState = resolveLightState("filled");
   polygons.forEach((poly, i) => {
@@ -342,26 +324,45 @@ function drawCurtainPaintings(pg, polygons) {
     // it, whatever the current scene is drawing behind the painting would
     // show through the collapsed/closed portion of the curtain.
     drawLightShape(pg, poly, offState, { strokeWeight: 9 });
-    const fraction = curtainOpenFraction(i);
+    const fraction = groupPulseFractionFor("paintings", i);
     if (fraction > 0.001) {
-      const litPoly = curtainPolygon(poly, fraction);
+      const litPoly = collapsePolygon(poly, fraction);
       drawLightShape(pg, litPoly, litState, { strokeWeight: 9 });
     }
   });
 }
 
-// "random": every painting independently fades between "off" and "filled" on
-// the exact same per-painting timer as "curtain" (curtainOpenFraction() -
-// same PAINTING_CURTAIN_* durations, same jittered period and phase offset
-// per painting), just without warping the polygon - so the two modes share
-// identical on/off timing and only differ in how the "on" painting looks.
-function drawRandomPaintings(pg, polygons) {
-  const offKeyframe = lightStateKeyframe("off");
+function drawCurtainPaintings(pg, polygons) {
+  drawCurtainPaintingsUsing(pg, polygons, curtainPolygon);
+}
+
+function drawCurtainVerticalPaintings(pg, polygons) {
+  drawCurtainPaintingsUsing(pg, polygons, curtainPolygonVertical);
+}
+
+// "random"/"randomOutline": every painting independently fades between a
+// low state and "filled" on the exact same per-painting timer as "curtain"
+// (curtainOpenFraction() - same PAINTING_CURTAIN_* durations, same jittered
+// period and phase offset per painting), just without warping the polygon -
+// so all three modes share identical on/off timing and only differ in how
+// the "off" painting looks: "random" goes fully dark ("off"), while
+// "randomOutline" keeps the painting's outline visible instead of vanishing
+// into the black background.
+function drawRandomFadePaintings(pg, polygons, lowMode) {
+  const lowKeyframe = lightStateKeyframe(lowMode);
   const onKeyframe = lightStateKeyframe("filled");
   polygons.forEach((poly, i) => {
-    const resolved = crossfadeKeyframes(offKeyframe, onKeyframe, curtainOpenFraction(i));
+    const resolved = crossfadeKeyframes(lowKeyframe, onKeyframe, curtainOpenFraction(i));
     drawLightShape(pg, poly, resolved, { strokeWeight: 9 });
   });
+}
+
+function drawRandomPaintings(pg, polygons) {
+  drawRandomFadePaintings(pg, polygons, "off");
+}
+
+function drawRandomOutlinePaintings(pg, polygons) {
+  drawRandomFadePaintings(pg, polygons, "outline");
 }
 
 // "wipe": a wave sweeps left-to-right across the paintings fading them in,
@@ -377,7 +378,7 @@ function drawRandomPaintings(pg, polygons) {
 const PAINTING_WIPE_ON_DURATION = 2.5; // seconds for the on-sweep to cross every painting
 const PAINTING_WIPE_HOLD_DURATION = 3; // seconds held fully lit
 const PAINTING_WIPE_OFF_DURATION = 2.5; // seconds for the off-sweep to cross every painting
-const PAINTING_WIPE_CLOSED_HOLD = 1.5; // seconds held fully dark
+const PAINTING_WIPE_CLOSED_HOLD = 0.4; // seconds held fully dark
 const PAINTING_WIPE_PERIOD =
   PAINTING_WIPE_ON_DURATION +
   PAINTING_WIPE_HOLD_DURATION +
@@ -422,6 +423,40 @@ function wipePosition(poly) {
   return (polygonCentroid(poly).x - minX) / span;
 }
 
+// "wipeDown": same sweep as "wipe" above but normalized against centroid y
+// instead of x, so it travels top-to-bottom instead of left-to-right.
+// Mirrors wipeBasisPolygons()'s join: paintings when paintingState is
+// "wipeDown", wing sculptures when butterflyState is "wipeDown", both/either/
+// neither depending on what's currently live, so the two read as one
+// continuous downward wave rather than two separately-normalized ones.
+function wipeDownBasisPolygons() {
+  const polys = [];
+  if (currentPaintingState() === "wipeDown") polys.push(...getPaintingPolygons());
+  if (currentButterflyState() === "wipeDown") polys.push(...getOutlinePolygons());
+  return polys;
+}
+
+let _wipeDownStatsCache = null;
+let _wipeDownStatsCacheFrame = -1;
+
+function wipeDownStats() {
+  if (_wipeDownStatsCacheFrame === frameCount) return _wipeDownStatsCache;
+  const ys = wipeDownBasisPolygons().map((poly) => polygonCentroid(poly).y);
+  const minY = ys.length ? Math.min(...ys) : 0;
+  const span = ys.length ? Math.max(Math.max(...ys) - minY, 1) : 1;
+  _wipeDownStatsCache = { minY, span };
+  _wipeDownStatsCacheFrame = frameCount;
+  return _wipeDownStatsCache;
+}
+
+function wipeDownPosition(poly, stats) {
+  return (polygonCentroid(poly).y - stats.minY) / stats.span;
+}
+
+function wipeDownLitFraction(poly) {
+  return wipeFractionAtPosition(wipeDownPosition(poly, wipeDownStats()));
+}
+
 // Maps elapsed time t (0..duration) to a sweep position padded by
 // PAINTING_WIPE_BAND on both ends, so a participant at position 0 starts
 // the sweep already fully faded out and one at position 1 ends it fully
@@ -463,8 +498,10 @@ function wipeLitFractions(polygons) {
   return polygons.map(wipeLitFraction);
 }
 
-function drawWipePaintings(pg, polygons) {
-  const fractions = wipeLitFractions(polygons);
+// Shared by drawWipePaintings/drawWipeDownPaintings below - crossfades each
+// painting between "off" and "filled" by its own already-computed sweep
+// fraction.
+function drawPaintingsWithFractions(pg, polygons, fractions) {
   const onKeyframe = lightStateKeyframe("filled");
   const offKeyframe = lightStateKeyframe("off");
   polygons.forEach((poly, i) => {
@@ -473,22 +510,154 @@ function drawWipePaintings(pg, polygons) {
   });
 }
 
-// "pulse": every painting fades black<->white on its own sinusoidal cycle,
-// each offset from the next by PAINTING_PULSE_OFFSET_STEP of a cycle (via
-// resolveLightState's phaseOffset - js/lightState.js) so the pulse visibly
-// ripples across the paintings in index order rather than every painting
-// breathing in lockstep.
-const PAINTING_PULSE_PERIOD = 4; // seconds for one full black<->white cycle
+function drawWipePaintings(pg, polygons) {
+  drawPaintingsWithFractions(pg, polygons, wipeLitFractions(polygons));
+}
+
+function drawWipeDownPaintings(pg, polygons) {
+  const fractions = polygons.map(wipeDownLitFraction);
+  drawPaintingsWithFractions(pg, polygons, fractions);
+}
+
+// "pulse": every painting cycles black<->white on its own timeline, each
+// offset from the next by PAINTING_PULSE_OFFSET_STEP of a cycle so the pulse
+// visibly ripples across the paintings in index order rather than every
+// painting breathing in lockstep. This is a deliberately asymmetric
+// fade-up/hold-on/fade-down/hold-off trapezoid (rather than
+// resolveLightState's generic mode:"pulse", a symmetric sine crossfade that
+// spends equal time - and equal transition speed - on both halves) so a
+// painting can stay lit much longer than it stays dark.
+const PAINTING_PULSE_FADE_UP = 0.4; // seconds to fade off -> on
+const PAINTING_PULSE_ON_HOLD = 3.5; // seconds held fully on
+const PAINTING_PULSE_FADE_DOWN = 0.4; // seconds to fade on -> off
+const PAINTING_PULSE_OFF_HOLD = 0.5; // seconds held fully off
+const PAINTING_PULSE_PERIOD =
+  PAINTING_PULSE_FADE_UP +
+  PAINTING_PULSE_ON_HOLD +
+  PAINTING_PULSE_FADE_DOWN +
+  PAINTING_PULSE_OFF_HOLD;
 const PAINTING_PULSE_OFFSET_STEP = 0.15; // fraction of a cycle between neighboring paintings
 
+// Maps elapsed time t (0..PAINTING_PULSE_PERIOD) to this cycle's on-ness
+// (0 = fully dark, 1 = fully lit) - see the stage constants above.
+function paintingPulseFraction(t) {
+  if (t < PAINTING_PULSE_FADE_UP) return t / PAINTING_PULSE_FADE_UP;
+  t -= PAINTING_PULSE_FADE_UP;
+  if (t < PAINTING_PULSE_ON_HOLD) return 1;
+  t -= PAINTING_PULSE_ON_HOLD;
+  if (t < PAINTING_PULSE_FADE_DOWN) return 1 - t / PAINTING_PULSE_FADE_DOWN;
+  return 0;
+}
+
 function drawPulsePaintings(pg, polygons) {
+  const onKeyframe = lightStateKeyframe("filled");
+  const offKeyframe = lightStateKeyframe("off");
   polygons.forEach((poly, i) => {
-    const resolved = resolveLightState({
-      mode: "pulse",
-      states: ["off", "filled"],
-      period: PAINTING_PULSE_PERIOD,
-      phaseOffset: i * PAINTING_PULSE_OFFSET_STEP,
-    });
+    const phaseOffset = i * PAINTING_PULSE_OFFSET_STEP * PAINTING_PULSE_PERIOD;
+    const t = (millis() / 1000 + phaseOffset) % PAINTING_PULSE_PERIOD;
+    const resolved = crossfadeKeyframes(
+      offKeyframe,
+      onKeyframe,
+      paintingPulseFraction(t)
+    );
+    drawLightShape(pg, poly, resolved, { strokeWeight: 9 });
+  });
+}
+
+// "groupPulse" (and "curtain"/"curtainVertical" above, which reuse this same
+// relay for their own expand/collapse animation): wall-declared PULSE_GROUPS
+// (js/left/sketch.js, js/right/sketch.js - each group a set of
+// painting/outline indices) take turns being lit, one group at a time: fades
+// in, holds, fades out, then the next group's turn starts, cycling back to
+// the first once every group has had a turn. Paintings/outlines not listed in
+// any group stay off the whole time. The open/hold/close timing here is
+// PAINTING_CURTAIN_OPEN/HOLD/CLOSE - shared with "curtain" rather than its
+// own separate numbers, so "how long does a group stay lit before fading"
+// reads the same for both.
+//
+// Since a group can span both paintings and wing sculptures (e.g. left
+// wall's wing-sculpture group), this needs one shared timeline that both
+// js/paintings.js's drawPaintings() and js/outlines.js's
+// drawButterflyLightState() read from - groupPulseFractionFor() below,
+// keyed by PULSE_GROUPS' own "paintings"/"outlines" property names.
+const GROUP_PULSE_PERIOD =
+  PAINTING_CURTAIN_OPEN + PAINTING_CURTAIN_HOLD + PAINTING_CURTAIN_CLOSE;
+
+// Which group is having its turn right now, and how lit it is (0 = just
+// starting to fade in / just finished fading out, 1 = fully held lit).
+// Cached per frame since every painting and every outline reads this same
+// answer once each.
+let _groupPulseStateCache = null;
+let _groupPulseStateCacheFrame = -1;
+
+function groupPulseActiveState() {
+  if (_groupPulseStateCacheFrame === frameCount) return _groupPulseStateCache;
+
+  const groups = typeof PULSE_GROUPS !== "undefined" ? PULSE_GROUPS : [];
+  let result;
+  if (groups.length === 0) {
+    result = { groupIndex: -1, fraction: 0 };
+  } else {
+    const totalPeriod = GROUP_PULSE_PERIOD * groups.length;
+    const t = (millis() / 1000) % totalPeriod;
+    const groupIndex = Math.floor(t / GROUP_PULSE_PERIOD);
+    const localT = t - groupIndex * GROUP_PULSE_PERIOD;
+
+    let fraction;
+    if (localT < PAINTING_CURTAIN_OPEN) {
+      fraction = localT / PAINTING_CURTAIN_OPEN;
+    } else if (localT < PAINTING_CURTAIN_OPEN + PAINTING_CURTAIN_HOLD) {
+      fraction = 1;
+    } else {
+      const closeT = localT - PAINTING_CURTAIN_OPEN - PAINTING_CURTAIN_HOLD;
+      fraction = 1 - closeT / PAINTING_CURTAIN_CLOSE;
+    }
+    result = { groupIndex, fraction };
+  }
+
+  _groupPulseStateCache = result;
+  _groupPulseStateCacheFrame = frameCount;
+  return result;
+}
+
+// `kind` is "paintings" or "outlines", matching PULSE_GROUPS' own property
+// names - `index` is that item's plain declaration-order index (into
+// paintingMaps or butterflyMaps respectively), not a surface-label id.
+function groupPulseFractionFor(kind, index) {
+  const groups = typeof PULSE_GROUPS !== "undefined" ? PULSE_GROUPS : [];
+  const { groupIndex, fraction } = groupPulseActiveState();
+  if (groupIndex < 0) return 0;
+  const members = (groups[groupIndex] && groups[groupIndex][kind]) || [];
+  return members.includes(index) ? fraction : 0;
+}
+
+function drawGroupPulsePaintings(pg, polygons) {
+  const onKeyframe = lightStateKeyframe("filled");
+  const offKeyframe = lightStateKeyframe("off");
+  polygons.forEach((poly, i) => {
+    const fraction = groupPulseFractionFor("paintings", i);
+    const resolved = crossfadeKeyframes(offKeyframe, onKeyframe, fraction);
+    drawLightShape(pg, poly, resolved, { strokeWeight: 9 });
+  });
+}
+
+// The mycelium scene's own paintingState (see js/scenes.js): a painting
+// crossfades from "off" to "filled" as js/mycelium.js's
+// myceliumPaintingRevealFraction() rises from 0 (untouched) to 1 (fully
+// revealed), the same crossfadeKeyframes() plumbing drawGroupPulsePaintings
+// uses for its own group-driven fraction - plus a drawGlow() halo grown in
+// step with that same fraction, so the reveal reads as the painting
+// actually illuminating rather than just its fill swapping color. (The
+// mossy edge-crawl ring that grows in tandem, around the painting's own
+// perimeter, is drawn separately by js/mycelium.js's drawMycelium() - it
+// lives on the scene layer underneath this, not here.)
+function drawMyceliumRevealPaintings(pg, polygons) {
+  const offKeyframe = lightStateKeyframe("off");
+  const onKeyframe = lightStateKeyframe("filled");
+  polygons.forEach((poly, i) => {
+    const fraction = myceliumPaintingRevealFraction(i);
+    if (fraction > 0) drawGlow(pg, poly, fraction);
+    const resolved = crossfadeKeyframes(offKeyframe, onKeyframe, fraction);
     drawLightShape(pg, poly, resolved, { strokeWeight: 9 });
   });
 }
@@ -498,7 +667,7 @@ function drawPaintings(pg) {
   const polygons = getPaintingPolygons();
 
   if (isSpotlightMode(stateValue)) {
-    const litIndices = spotlightLitIndices(stateValue, polygons.length);
+    const litIndices = spotlightLitIndices(polygons.length);
     const onState = resolveLightState("filled");
     const offState = resolveLightState("outline");
     polygons.forEach((poly, i) => {
@@ -508,10 +677,18 @@ function drawPaintings(pg) {
     return;
   }
 
+  if (stateValue === "myceliumReveal")
+    return drawMyceliumRevealPaintings(pg, polygons);
   if (stateValue === "curtain") return drawCurtainPaintings(pg, polygons);
+  if (stateValue === "curtainVertical")
+    return drawCurtainVerticalPaintings(pg, polygons);
   if (stateValue === "random") return drawRandomPaintings(pg, polygons);
+  if (stateValue === "randomOutline")
+    return drawRandomOutlinePaintings(pg, polygons);
   if (stateValue === "wipe") return drawWipePaintings(pg, polygons);
+  if (stateValue === "wipeDown") return drawWipeDownPaintings(pg, polygons);
   if (stateValue === "pulse") return drawPulsePaintings(pg, polygons);
+  if (stateValue === "groupPulse") return drawGroupPulsePaintings(pg, polygons);
 
   const resolved = resolveLightState(stateValue);
 

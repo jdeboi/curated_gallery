@@ -31,8 +31,12 @@
 
 const VIDEO_FILES = [
   // { path: "assets/video/checkers.mp4" },
-  { path: "assets/video/convergetriangles.mp4" },
-  { path: "assets/video/noisewaves.mp4" },
+  { path: "assets/video/convergetriangles.mp4", paintingState: "filled" },
+  {
+    path: "assets/video/noisewaves.mp4",
+    paintingState: "wipeDown",
+    butterflyState: "wipeDown",
+  },
   // { path: "assets/video/ovalspin.mp4" },
   // { path: "assets/video/pixels.mp4", tile: 2 },
   // { path: "assets/video/rectspin.mp4" },
@@ -103,11 +107,16 @@ function drawVideoScene(pg, index) {
 // hand-written so adding/removing a file there is the only edit needed
 // to change what's in rotation.
 function buildVideoScenes() {
-  return VIDEO_FILES.map(({ path }, i) => ({
+  return VIDEO_FILES.map(({ path, paintingState, butterflyState }, i) => ({
     name: `video: ${path.split("/").pop()}`,
     duration: VIDEO_SCENE_DURATION,
     init: () => enterVideoScene(i),
     update: () => {},
     draw: (pg) => drawVideoScene(pg, i),
+    // Optional per-video overrides (see noisewaves.mp4's "wipeDown" above) -
+    // omitted entries fall back to the LIGHT_STATE_DEFAULT ("filled") same
+    // as any other scene that doesn't set paintingState/butterflyState.
+    ...(paintingState ? { paintingState } : {}),
+    ...(butterflyState ? { butterflyState } : {}),
   }));
 }

@@ -56,8 +56,10 @@
  * live, in the shared vocabulary from js/lightState.js ("filled",
  * "outline", "off", or a pulse/switch descriptor between them) plus the
  * spotlight/animated painting-only modes from js/paintings.js ("sequence",
- * "random", "column", "row", "curtain", "wipe", "pulse"). Neither field is
- * required: a scene that omits one gets LIGHT_STATE_DEFAULT ("filled" -
+ * "random", "randomOutline", "curtain", "curtainVertical", "wipe",
+ * "wipeDown", "pulse", "groupPulse").
+ * Neither field is required: a scene that omits one gets
+ * LIGHT_STATE_DEFAULT ("filled" -
  * everything illuminated), which is why plain scenes below don't set them
  * at all. This is separate from a scene's own init/update/draw -
  * "emanate"'s rippling animation, for instance, plays on top of whatever
@@ -83,30 +85,46 @@ const DEFAULT_SCENE_DURATION = 20000;
 
 const SCENES = [
   {
-    name: "black",
-    duration: 20000,
-    init: () => {},
-    update: () => {},
-    draw: (pg) => pg.background(0),
-    // paintingState/butterflyState omitted -> default "filled", so the
-    // paintings/sculptures still read normally against the plain black
-    // field rather than going dark themselves.
-  },
-  {
     name: "mycelium",
     duration: 45000,
     init: initMycelium,
     update: updateMycelium,
-    draw: drawMycelium,
+    // Mirror masks (js/mirrorMasks.js) sit in "outline mode" here - a stroke
+    // drawn outside their own opaque black shape, instead of staying plain
+    // black like every other non-special scene - but only once
+    // mirrorMaskEffectsEnabled is switched on ("m"); it's a no-op otherwise.
+    draw: (pg) => {
+      drawMycelium(pg);
+      drawMirrorMaskOutlines(pg);
+    },
+    paintingState: "myceliumReveal",
   },
   {
     name: "emanate",
     duration: 40000,
     init: () => {},
     update: () => {},
-    draw: drawEmanateRipples, // js/outlines.js
+    // On a wall with no wing sculptures (empty butterflyMaps, e.g. the
+    // right wall - see js/right/sketch.js), drawEmanateRipples has nothing
+    // to ripple around and draws nothing at all, leaving that wall dark
+    // for the whole scene. Fall back to the painting-quad version of the
+    // same ripple instead of doing nothing - and skip the mirror-mask
+    // outline too, so the right wall's "emanate" reads as pure
+    // emanatePaintings rather than a mix of the two. (drawMirrorMaskOutlines
+    // is a no-op unless mirrorMaskEffectsEnabled is switched on - "m".)
+    draw: (pg) => {
+      if (butterflyMaps.length === 0) {
+        drawPaintingEmanateRipples(pg); // js/paintings.js
+      } else {
+        drawEmanateRipples(pg); // js/outlines.js
+        drawMirrorMaskOutlines(pg); // js/mirrorMasks.js
+      }
+    },
     // butterflyState omitted -> defaults to "filled", so the sculptures
     // stay solid white while the ripples play on top.
+    // paintingState omitted -> also defaults to "filled", matching what
+    // "emanatePaintings" sets explicitly below - relevant here on the
+    // fallback wall, where the ripples play on the paintings instead.
   },
   {
     name: "emanatePaintings",
@@ -114,9 +132,10 @@ const SCENES = [
     init: () => {},
     update: () => {},
     draw: drawPaintingEmanateRipples, // js/paintings.js
-    // paintingState omitted -> defaults to "filled", so the paintings stay
-    // solid white while the ripples play on top - same as "emanate" does
-    // for the wing sculptures' butterflyState.
+    paintingState: "filled",
+    // Explicit rather than relying on the "filled" default, so the
+    // paintings' steady state can't drift out of sync with what this
+    // scene's ripples assume they're drawn against.
   },
   {
     name: "fireflies",
@@ -124,6 +143,8 @@ const SCENES = [
     init: initParticles,
     update: updateParticles,
     draw: drawParticles,
+    paintingState: "random",
+    butterflyState: "random",
   },
   {
     name: "vines",
@@ -138,6 +159,15 @@ const SCENES = [
     init: initFronds,
     update: updateFronds,
     draw: drawFronds,
+    paintingState: "wipe",
+    butterflyState: "wipe",
+  },
+  {
+    name: "grass",
+    duration: 35000,
+    init: initGrass,
+    update: updateGrass,
+    draw: drawGrass, // js/grass.js - shader-based
   },
   {
     name: "birds",
@@ -145,6 +175,7 @@ const SCENES = [
     init: initBirds,
     update: updateBirds,
     draw: drawBirds,
+    paintingState: "randomOutline",
   },
   {
     name: "butterflies",
@@ -152,6 +183,7 @@ const SCENES = [
     init: initButterflies,
     update: updateButterflies,
     draw: drawButterflies,
+    paintingState: "randomOutline",
   },
   {
     name: "nightBirds",
@@ -168,6 +200,13 @@ const SCENES = [
     paintingState: "outline",
   },
   {
+    name: "fluidFall",
+    duration: 35000,
+    init: initFluidFall,
+    update: updateFluidFall,
+    draw: drawFluidFall, // js/fluidFall.js - shader-based
+  },
+  {
     name: "reactionDiffusion",
     duration: 40000,
     init: initReactionDiffusion,
@@ -180,64 +219,29 @@ const SCENES = [
     init: initStars,
     update: updateStars,
     draw: drawStars, // js/stars.js
-  },
-  // The following are painting-choreography scenes: a plain black field so
-  // each painting mode (js/paintings.js) reads clearly on its own, rather
-  // than competing with a generative background.
-  {
-    name: "curtain",
-    duration: 30000,
-    init: () => {},
-    update: () => {},
-    draw: (pg) => pg.background(0),
     paintingState: "curtain",
   },
   {
-    name: "wipe",
-    duration: 30000,
-    init: () => {},
-    update: () => {},
-    draw: (pg) => pg.background(0),
-    paintingState: "wipe",
-    // Wing sculptures join the same sweep as the paintings (see
-    // js/paintings.js's wipeBasisPolygons()) rather than sitting there
-    // steadily lit while it plays - a no-op on walls with no OUTLINE_SPECS
-    // (e.g. the right wall).
-    butterflyState: "wipe",
+    name: "sparkleStars",
+    duration: 35000,
+    init: initSparkleStars,
+    update: updateSparkleStars,
+    draw: drawSparkleStars, // js/sparkleStars.js
+    // Opposite of "stars"' own curtain direction (horizontal) below.
+    paintingState: "curtainVertical",
   },
-  {
-    name: "column",
-    duration: 30000,
-    init: () => {},
-    update: () => {},
-    draw: (pg) => pg.background(0),
-    paintingState: "column",
-  },
-  {
-    name: "row",
-    duration: 30000,
-    init: () => {},
-    update: () => {},
-    draw: (pg) => pg.background(0),
-    paintingState: "row",
-  },
-  {
-    name: "pulse",
-    duration: 30000,
-    init: () => {},
-    update: () => {},
-    draw: (pg) => pg.background(0),
-    paintingState: "pulse",
-  },
+  // Painting-choreography scene: a plain black field so its painting mode
+  // (js/paintings.js) reads clearly on its own, rather than competing with a
+  // generative background.
   {
     name: "spinner",
     duration: 30000,
     init: () => {},
     update: () => {},
     draw: (pg) => pg.background(0),
-    overlay: drawSpinnerOutlines, // js/outlines.js
-    paintingState: "off",
-    butterflyState: "off",
+    overlay: drawSpinnerOutlines, // js/outlines.js - now circles wing sculptures too
+    paintingState: "groupPulse",
+    butterflyState: "groupPulse",
   },
   // One entry per file in js/video.js's VIDEO_FILES - see that file for
   // why these are generated instead of listed by hand here.

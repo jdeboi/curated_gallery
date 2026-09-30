@@ -126,9 +126,18 @@ const BUTTERFLY_LIGHT_OVERRIDES = [
   "glow",
   "outline",
   "off",
+  "random",
   "wipe",
+  "wipeDown",
+  "groupPulse",
 ];
 let butterflyLightOverride = "auto";
+
+// Offsets a wing sculpture's index into a different slice of
+// curtainOpenFraction()'s (js/paintings.js) hash space than paintings use, so
+// a sculpture at the same index as a painting doesn't happen to share its
+// exact jitter/phase - see "random" below.
+const BUTTERFLY_RANDOM_SALT = 1000;
 
 function cycleButterflyLightMode() {
   const idx = BUTTERFLY_LIGHT_OVERRIDES.indexOf(butterflyLightOverride);
@@ -166,6 +175,41 @@ function drawButterflyLightState(pg, index, refMap) {
   const stateValue = currentButterflyState();
   if (stateValue === "wipe") {
     const fraction = wipeLitFraction(localPoints);
+    const onKeyframe = lightStateKeyframe("filled");
+    const offKeyframe = lightStateKeyframe("off");
+    const resolved = crossfadeKeyframes(offKeyframe, onKeyframe, fraction);
+    drawLightShape(pg, localPoints, resolved, { strokeWeight: 9 });
+    return;
+  }
+  // "wipeDown": same idea as "wipe" above but sweeping top-to-bottom,
+  // joining js/paintings.js's own "wipeDown" basis whenever paintingState is
+  // *also* "wipeDown" (see wipeDownBasisPolygons() there).
+  if (stateValue === "wipeDown") {
+    const fraction = wipeDownLitFraction(localPoints);
+    const onKeyframe = lightStateKeyframe("filled");
+    const offKeyframe = lightStateKeyframe("off");
+    const resolved = crossfadeKeyframes(offKeyframe, onKeyframe, fraction);
+    drawLightShape(pg, localPoints, resolved, { strokeWeight: 9 });
+    return;
+  }
+  // "random": each sculpture independently fades between "off" and "filled"
+  // on its own jittered timer - the same curtainOpenFraction() (js/paintings.js)
+  // that drives paintings' own "random" mode, just salted so the two index
+  // spaces don't land in lockstep - see BUTTERFLY_RANDOM_SALT above.
+  if (stateValue === "random") {
+    const fraction = curtainOpenFraction(index, BUTTERFLY_RANDOM_SALT);
+    const onKeyframe = lightStateKeyframe("filled");
+    const offKeyframe = lightStateKeyframe("off");
+    const resolved = crossfadeKeyframes(offKeyframe, onKeyframe, fraction);
+    drawLightShape(pg, localPoints, resolved, { strokeWeight: 9 });
+    return;
+  }
+  // "groupPulse": joins the same wall-declared PULSE_GROUPS relay as
+  // paintings.js's own "groupPulse" mode (see drawGroupPulsePaintings() /
+  // groupPulseFractionFor() there) - a sculpture lights up on its group's
+  // turn, sharing that mode's timeline rather than running its own.
+  if (stateValue === "groupPulse") {
+    const fraction = groupPulseFractionFor("outlines", index);
     const onKeyframe = lightStateKeyframe("filled");
     const offKeyframe = lightStateKeyframe("off");
     const resolved = crossfadeKeyframes(offKeyframe, onKeyframe, fraction);
@@ -263,13 +307,24 @@ function drawEmanateRipples(pg) {
 // glide continuously along any polygon's edges regardless of how many
 // vertices it has (a painting's plain 4-corner quad, or a traced 24-point
 // wing silhouette) rather than jumping vertex to vertex.
-function pointAtPerimeterFraction(poly, t) {
+// Edge lengths + perimeter only depend on `poly` itself, not on `t` - so
+// drawSpinnerOnPolygon computes this once per polygon per frame (via
+// buildPerimeterMetrics) and hands it to every one of the ~56
+// pointAtPerimeterFraction calls that walk that same ring, instead of each
+// call re-doing the n Math.hypot calls + reduce from scratch.
+function buildPerimeterMetrics(poly) {
   const n = poly.length;
   const edgeLengths = poly.map((p, i) => {
     const q = poly[(i + 1) % n];
     return Math.hypot(q.x - p.x, q.y - p.y);
   });
   const perimeter = edgeLengths.reduce((a, b) => a + b, 0) || 1;
+  return { edgeLengths, perimeter };
+}
+
+function pointAtPerimeterFraction(poly, t, metrics) {
+  const n = poly.length;
+  const { edgeLengths, perimeter } = metrics || buildPerimeterMetrics(poly);
   let dist = (((t % 1) + 1) % 1) * perimeter;
 
   for (let i = 0; i < n; i++) {
@@ -287,16 +342,16 @@ function pointAtPerimeterFraction(poly, t) {
 // The "spinner" scene's own animation (js/scenes.js, set as that scene's
 // `overlay` - see js/wall.js's drawShowOverlay() for why this needs to be an
 // overlay rather than a plain `draw`): SPINNER_ARM_COUNT evenly-spaced
-// comet heads cycle around each painting's and wing sculpture's perimeter,
-// each trailing a short fading tail, like a loading spinner traced around
-// every lit surface on the wall. Drawn over both paintings (js/paintings.js)
-// and wing sculptures - the one effect in this file that reaches outside
-// its own outlines - so it needs to run after paintings.js/outlines.js are
-// both loaded, but since these are just function declarations that's only
-// ever a requirement at *call* time (draw()), which is already true of
-// every scene here.
-const SPINNER_PERIOD = 3; // seconds for one full lap around a surface
-const SPINNER_ARM_COUNT = 3; // evenly-spaced cycling comets per surface
+// comet heads cycle around each painting's perimeter, each trailing a short
+// fading tail, like a loading spinner traced around every painting on the
+// wall (wing sculptures are left alone). Drawn over the paintings
+// (js/paintings.js) - the one effect in this file that reaches outside its
+// own outlines - so it needs to run after paintings.js/outlines.js are both
+// loaded, but since these are just function declarations that's only ever a
+// requirement at *call* time (draw()), which is already true of every scene
+// here.
+const SPINNER_PERIOD = 4; // seconds for one full lap around a surface
+const SPINNER_ARM_COUNT = 4; // evenly-spaced cycling comets per surface
 const SPINNER_TAIL_LENGTH = 0.12; // fraction of the loop each tail covers
 const SPINNER_TAIL_SAMPLES = 14; // points sampled along each tail's fade
 const SPINNER_DOT_SIZE = 10;
@@ -305,6 +360,85 @@ const SPINNER_DOT_SIZE = 10;
 // without it the comets trace directly along the painting/wing sculpture's
 // own edge, reading as glued to the frame rather than circling it.
 const SPINNER_OFFSET_SCALE = 1.1;
+// Every point along an arm - lead and trail alike - renders as a 4-point
+// sparkle rather than a plain dot, shrinking from SPINNER_STAR_SIZE at the
+// head down to SPINNER_STAR_SIZE * SPINNER_TAIL_STAR_MIN_SCALE by the end of
+// the tail as it fades.
+const SPINNER_STAR_SIZE = SPINNER_DOT_SIZE * 2;
+const SPINNER_STAR_INNER_RATIO = 0.35; // how pinched the star's waist is
+const SPINNER_TAIL_STAR_MIN_SCALE = 0.4;
+
+const SPARKLE_CURVE_SAMPLES = 4; // points sampled along each pinched curve between tips
+
+function quadraticBezierPoint(p0, c, p1, t) {
+  const mt = 1 - t;
+  return {
+    x: mt * mt * p0.x + 2 * mt * t * c.x + t * t * p1.x,
+    y: mt * mt * p0.y + 2 * mt * t * c.y + t * t * p1.y,
+  };
+}
+
+// The sparkle is the same 4-point shape at every size (head and tail alike -
+// see drawSpinnerOnPolygon), just scaled and faded differently, so its
+// outline is computed once at unit radius (outerRadius = 0.5) rather than
+// re-deriving the trig + bezier sampling for every one of the ~dozens of
+// stars drawn per painting per frame. drawSparkleStar() below just
+// translate/scales this cached shape into place.
+function buildUnitSparkleStarPoints() {
+  const outerRadius = 0.5;
+  const innerRadius = outerRadius * SPINNER_STAR_INNER_RATIO;
+  const tips = 4;
+  const points = [];
+  for (let i = 0; i < tips; i++) {
+    const tipAngle = (i / tips) * TWO_PI;
+    const nextTipAngle = ((i + 1) / tips) * TWO_PI;
+    const midAngle = tipAngle + PI / tips;
+    const p0 = {
+      x: outerRadius * Math.cos(tipAngle),
+      y: outerRadius * Math.sin(tipAngle),
+    };
+    const c = {
+      x: innerRadius * Math.cos(midAngle),
+      y: innerRadius * Math.sin(midAngle),
+    };
+    const p1 = {
+      x: outerRadius * Math.cos(nextTipAngle),
+      y: outerRadius * Math.sin(nextTipAngle),
+    };
+    points.push(p0);
+    for (let s = 1; s < SPARKLE_CURVE_SAMPLES; s++) {
+      points.push(quadraticBezierPoint(p0, c, p1, s / SPARKLE_CURVE_SAMPLES));
+    }
+  }
+  return points;
+}
+// Lazily built on first use rather than at script-load time - buildUnitSparkleStarPoints()
+// needs TWO_PI, which p5 hasn't attached to the global scope yet while
+// scripts are still loading (same constraint js/fronds.js works around for
+// PI - see its DEG comment).
+let sparkleStarUnitPoints = null;
+function getSparkleStarUnitPoints() {
+  if (!sparkleStarUnitPoints) sparkleStarUnitPoints = buildUnitSparkleStarPoints();
+  return sparkleStarUnitPoints;
+}
+
+// A 4-point "sparkle" glyph: outer tips connected by a quadratic curve pulled
+// in toward the center, giving concave pinched sides instead of a plain
+// diamond/star polygon. Always drawn at a fixed orientation (no spin) - tips
+// point up/down/left/right.
+//
+// Positions vertices with plain arithmetic (cx + p.x * size) rather than
+// push()/translate()/scale()/pop() - with ~56 stars drawn per polygon per
+// frame, that's 4 matrix-stack operations avoided per star (thousands per
+// frame across every painting/outline), for the same drawn shape.
+function drawSparkleStar(pg, cx, cy, size, alpha) {
+  pg.fill(255, alpha);
+  pg.beginShape();
+  getSparkleStarUnitPoints().forEach((p) =>
+    pg.vertex(cx + p.x * size, cy + p.y * size),
+  );
+  pg.endShape(CLOSE);
+}
 
 function drawSpinnerOnPolygon(pg, poly) {
   const centroid = polygonCentroid(poly);
@@ -312,17 +446,23 @@ function drawSpinnerOnPolygon(pg, poly) {
     x: centroid.x + (p.x - centroid.x) * SPINNER_OFFSET_SCALE,
     y: centroid.y + (p.y - centroid.y) * SPINNER_OFFSET_SCALE,
   }));
+  const metrics = buildPerimeterMetrics(ring);
   const t = millis() / (SPINNER_PERIOD * 1000);
   pg.push();
   pg.noStroke();
   for (let a = 0; a < SPINNER_ARM_COUNT; a++) {
     const headT = t + a / SPINNER_ARM_COUNT;
-    for (let s = 0; s < SPINNER_TAIL_SAMPLES; s++) {
+    const headPt = pointAtPerimeterFraction(ring, headT, metrics);
+    drawSparkleStar(pg, headPt.x, headPt.y, SPINNER_STAR_SIZE, 255);
+    for (let s = 1; s < SPINNER_TAIL_SAMPLES; s++) {
       const back = (s / SPINNER_TAIL_SAMPLES) * SPINNER_TAIL_LENGTH;
-      const pt = pointAtPerimeterFraction(ring, headT - back);
-      const alpha = 255 * (1 - s / SPINNER_TAIL_SAMPLES);
-      pg.fill(255, alpha);
-      pg.ellipse(pt.x, pt.y, SPINNER_DOT_SIZE, SPINNER_DOT_SIZE);
+      const pt = pointAtPerimeterFraction(ring, headT - back, metrics);
+      const fraction = s / SPINNER_TAIL_SAMPLES;
+      const alpha = 255 * (1 - fraction);
+      const size =
+        SPINNER_STAR_SIZE *
+        lerpValue(1, SPINNER_TAIL_STAR_MIN_SCALE, fraction);
+      drawSparkleStar(pg, pt.x, pt.y, size, alpha);
     }
   }
   pg.pop();
@@ -331,13 +471,24 @@ function drawSpinnerOnPolygon(pg, poly) {
 function drawSpinnerOutlines(pg) {
   getPaintingPolygons().forEach((poly) => drawSpinnerOnPolygon(pg, poly));
   getOutlinePolygons().forEach((poly) => drawSpinnerOnPolygon(pg, poly));
+  // Mirror masks (js/mirrorMasks.js) get the same circling stars as every
+  // other painting/outline - their own black fill still wins underneath
+  // (drawn later, as part of the absolute-screen mask overlay), so only the
+  // portion of the ring outside the mask's own shape ends up visible. Gated
+  // behind mirrorMaskEffectsEnabled ("m" toggles it) same as the emanate/
+  // mycelium treatment - off by default, so a mirror mask stays plain black
+  // until that's switched on.
+  if (mirrorMaskEffectsEnabled) {
+    getMirrorMaskPolygons().forEach((poly) => drawSpinnerOnPolygon(pg, poly));
+  }
 }
 
 // Same cache-per-frame pattern as getPaintingPolygons() (js/paintings.js),
 // for the same reason: this is the outline-avoidance counterpart paintings
 // already had, so particles/vines/mycelium can bounce off a wing sculpture
 // the same way they bounce off a painting, and each of those calls
-// vineObstacles()/myceliumObstacles()/updateParticles() once per frame.
+// vineObstacles()/myceliumInflatedOutlinePolygons()/updateParticles() once
+// per frame.
 // Skips any outline whose SVG hasn't finished loading yet (or, on a wall
 // with no OUTLINE_SPECS at all, returns an empty list) via
 // outlineLocalPoints()'s own null check.
