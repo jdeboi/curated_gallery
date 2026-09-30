@@ -100,6 +100,13 @@ const SCENES = [
     paintingState: "myceliumReveal",
   },
   {
+    name: "hyphae",
+    duration: 40000,
+    init: initHyphae,
+    update: updateHyphae,
+    draw: drawHyphae, // js/hyphae.js - grayscale branching network + spores, ignores paintings
+  },
+  {
     name: "emanate",
     duration: 40000,
     init: () => {},
