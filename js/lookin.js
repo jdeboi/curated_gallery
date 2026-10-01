@@ -5,7 +5,9 @@
  * The SVG's own paths are drawn straight onto the panel's 2D canvas as
  * Path2D objects (rather than stamping the PNG), so the letters stay crisp at
  * whatever size a painting's quad needs and each path can animate on its own.
- * At load, every path is measured (getBBox) and sorted into two groups:
+ * At load, every path is measured (getBBox), restacked from the SVG's single
+ * line into "I SEE" / "YOU" / "LOOKIN" (layoutLookinLines()) so the text
+ * fills more of a painting, and sorted into two groups:
  *   - letters: written left-to-right, each unmasked left-to-right while it
  *     rises and fades into place - reads like the phrase being penned.
  *   - face parts (the pupil, eyebrows, smile, flourish around "LOOKIN"'s Os):
@@ -51,11 +53,17 @@ const LOOKIN_UNFILL_FADE = 1.2; // seconds to fade lit -> dark
 const LOOKIN_DARK_HOLD = 4; // seconds held dark before writing again (jittered per painting)
 const LOOKIN_MAX_START_DELAY = 8; // a painting's first turn starts somewhere in 0..this many seconds into the scene
 
+// Line layout: the SVG is one line ("I SEE YOU LOOKIN"); it's restacked
+// into lines of this many words each - "I SEE" / "YOU" / "LOOKIN" - so the
+// text can be much bigger on a painting (see layoutLookinLines()).
+const LOOKIN_WORDS_PER_LINE = [2, 1, 1];
+const LOOKIN_LINE_GAP = 0.2; // space between lines, as a fraction of a letter's height
+
 // Text size within a painting - it's fit to whichever of these is tighter.
 const LOOKIN_FIT_WIDTH = 0.85; // max fraction of the painting's width
 const LOOKIN_FIT_HEIGHT = 0.8; // max fraction of the painting's height
 
-let lookinArt = null; // { w, h, parts, writeDuration } once the SVG has loaded
+let lookinArt = null; // { w, h, parts, writeDuration } (w/h are the stacked layout's) once the SVG has loaded
 let lookinStartMs = 0;
 
 // p5.js 2.0 removed preload() - call this once from each wall's own setup(),
@@ -93,9 +101,10 @@ function parseSvgParts(svgText) {
 // Splits the text's paths into letters/face parts and assigns each its start
 // time within the write phase.
 function buildLookinArt(svgText) {
-  const { w, h, parts } = parseSvgParts(svgText);
+  const { parts } = parseSvgParts(svgText);
   const { letters, face } = classifyLookinParts(parts);
   letters.sort((a, b) => a.x - b.x);
+  const { w, h } = layoutLookinLines(letters, face);
   face.sort((a, b) => a.w * a.h - b.w * b.h); // smallest first: pupil, eyebrows, ..., smile
 
   letters.forEach((p, i) => {
@@ -110,6 +119,66 @@ function buildLookinArt(svgText) {
   const writeDuration = face.length ? face[face.length - 1].start + LOOKIN_FACE_POP : lettersEnd;
 
   return { w, h, parts: [...letters, ...face], writeDuration };
+}
+
+// Restacks the one-line lettering into LOOKIN_WORDS_PER_LINE lines: gives
+// every part a dx/dy offset from its SVG position and returns the stacked
+// layout's size. Word breaks are the widest gaps between consecutive letters
+// (letters must already be sorted by x); each face part goes with the word
+// nearest its center (the eyebrows/pupil/smile all belong to "LOOKIN"). Each
+// line is centered horizontally; lines stack top to bottom with
+// LOOKIN_LINE_GAP between their full extents (face parts included).
+function layoutLookinLines(letters, face) {
+  const wordCount = LOOKIN_WORDS_PER_LINE.reduce((a, b) => a + b, 0);
+  const breaks = letters
+    .slice(1)
+    .map((p, i) => ({ i: i + 1, gap: p.x - (letters[i].x + letters[i].w) }))
+    .sort((a, b) => b.gap - a.gap)
+    .slice(0, wordCount - 1)
+    .map((b) => b.i)
+    .sort((a, b) => a - b);
+  const words = [];
+  let from = 0;
+  [...breaks, letters.length].forEach((to) => {
+    words.push(letters.slice(from, to));
+    from = to;
+  });
+
+  const wordRange = (word) => ({ x0: word[0].x, x1: Math.max(...word.map((p) => p.x + p.w)) });
+  face.forEach((p) => {
+    const cx = p.x + p.w / 2;
+    const dist = (r) => (cx < r.x0 ? r.x0 - cx : cx > r.x1 ? cx - r.x1 : 0);
+    let best = 0;
+    words.forEach((word, i) => {
+      if (dist(wordRange(word)) < dist(wordRange(words[best]))) best = i;
+    });
+    words[best].push(p);
+  });
+
+  const lines = [];
+  let wi = 0;
+  LOOKIN_WORDS_PER_LINE.forEach((n) => {
+    lines.push(words.slice(wi, wi + n).flat());
+    wi += n;
+  });
+
+  const gap = lookinMedian(letters.map((p) => p.h)) * LOOKIN_LINE_GAP;
+  const boxes = lines.map((line) => {
+    const x0 = Math.min(...line.map((p) => p.x));
+    const y0 = Math.min(...line.map((p) => p.y));
+    return { x0, y0, w: Math.max(...line.map((p) => p.x + p.w)) - x0, h: Math.max(...line.map((p) => p.y + p.h)) - y0 };
+  });
+  const w = Math.max(...boxes.map((b) => b.w));
+  let y = 0;
+  lines.forEach((line, i) => {
+    const b = boxes[i];
+    line.forEach((p) => {
+      p.dx = (w - b.w) / 2 - b.x0;
+      p.dy = y - b.y0;
+    });
+    y += b.h + gap;
+  });
+  return { w, h: y - gap };
 }
 
 function lookinMedian(values) {
@@ -180,6 +249,7 @@ function lookinPhase(t, i) {
 function drawLookinPart(ctx, part, localT) {
   if (localT <= 0) return;
   ctx.save();
+  ctx.translate(part.dx, part.dy); // its spot in the stacked layout
   if (part.kind === "letter") {
     const e = lookinEaseOutCubic(Math.min(localT / LOOKIN_LETTER_DRAW, 1));
     ctx.globalAlpha = e;
