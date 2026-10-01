@@ -351,3 +351,20 @@ function drawSurfaceLabels() {
   });
   pop();
 }
+
+// Each computer's own calibration lives in maps/<wall>/map.json, which is
+// gitignored so a `git pull` never touches it. A wall that hasn't saved one
+// yet falls back to the committed maps/<wall>/map.default.json. The
+// existence check bypasses the browser cache so a freshly copied-in map.json
+// is picked up on a plain reload (or `l`).
+async function loadWallMap(wall, onLoaded) {
+  const local = `maps/${wall}/map.json`;
+  let path = `maps/${wall}/map.default.json`;
+  try {
+    const res = await fetch(local, { method: "HEAD", cache: "no-store" });
+    if (res.ok) path = local;
+  } catch (err) {
+    // no local map - use the default
+  }
+  pMapper.load(`${path}?t=${Date.now()}`, onLoaded);
+}

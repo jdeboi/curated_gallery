@@ -172,7 +172,10 @@ default) defers back to whatever the live scene declares.
    child of *its own* panel (see below).
 5. Press `s` - this downloads a JSON file (`left-map.json` /
    `right-map.json`) to your browser's Downloads folder. Move it to
-   `maps/left/map.json` / `maps/right/map.json` to persist it.
+   `maps/left/map.json` / `maps/right/map.json` to persist it. That file
+   is gitignored, so each computer keeps its own calibration across
+   `git pull`; a wall without one loads the committed
+   `maps/<wall>/map.default.json` instead.
 
 Keybindings (see `keyPressed()` in each wall's `sketch.js`):
 
@@ -181,7 +184,7 @@ Keybindings (see `keyPressed()` in each wall's `sketch.js`):
 | `c` | Toggle calibration mode |
 | `p` | Toggle parent-lock (paintings/outlines <-> their panel) |
 | `s` | Save calibration (downloads a JSON file - see step 5 above) |
-| `l` | Reload calibration from `maps/<wall>/map.json` |
+| `l` | Reload calibration from `maps/<wall>/map.json` (or `map.default.json`) |
 | `f` | Toggle fullscreen |
 | `q` | Cycle butterfly light override (auto / filled / glow / outline / off) |
 | `w` | Cycle painting light override (auto / filled / glow / outline / off) |
@@ -252,9 +255,9 @@ no other white-screen reports remain.
    `PAINTING_SPECS`, and `OUTLINE_SPECS` for that wall's real layout.
 2. Copy `right.html` to `<wall>.html`, pointing its last script tag at
    `js/<wall>/sketch.js`.
-3. Add `maps/<wall>/map.json` (an empty `{"surfaces": [], "lines": []}`
-   is fine to start) and point that wall's `pMapper.load(...)` /
-   `pMapper.save(...)` calls at it.
+3. Add `maps/<wall>/map.default.json` (an empty
+   `{"surfaces": [], "lines": []}` is fine to start) and point that wall's
+   `loadWallMap(...)` / `pMapper.save(...)` calls at it.
 4. Add any wall-specific assets under `assets/<wall>/`.
 
 No engine file (`js/*.js` outside the per-wall folders) needs touching.
@@ -285,7 +288,8 @@ No engine file (`js/*.js` outside the per-wall folders) needs touching.
 - `js/parenting.js` - lock/unlock helpers wiring each painting/outline to
   its own panel via p5.mapper's parenting API.
 - `js/debug.js` - temporary WebGL-context diagnostic harness (see above).
-- `maps/left/map.json`, `maps/right/map.json` - each wall's saved
-  calibration (surface positions, corner pins, parent relationships).
+- `maps/<wall>/map.json` - this computer's saved calibration (surface
+  positions, corner pins, parent relationships); gitignored.
+  `maps/<wall>/map.default.json` is the committed fallback.
 - `assets/left/`, `assets/right/` - each wall's own images/SVGs.
   `assets/Roboto.ttf` is shared.

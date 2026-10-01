@@ -259,7 +259,7 @@ function setup() {
   initShow();
 
   loadOutlineSVGs().then(() => {
-    pMapper.load("maps/right/map.json", () => {
+    loadWallMap("right", () => {
       syncParentingLockFromLoadedState();
     });
   });
@@ -308,7 +308,7 @@ function keyPressed() {
       break;
     }
     case "l":
-      pMapper.load("maps/right/map.json", () => {
+      loadWallMap("right", () => {
         syncParentingLockFromLoadedState();
       });
       break;

@@ -182,7 +182,7 @@ function setup() {
   // saved corner positions (see js/outlines.js for how the traced shape
   // and the corner-pin calibration stay independent of each other).
   loadOutlineSVGs().then(() => {
-    pMapper.load("maps/left/map.json", () => {
+    loadWallMap("left", () => {
       // Reflects whatever was actually saved (paintings/outlines may or may
       // not have been parented to their panel) rather than assuming unlocked.
       syncParentingLockFromLoadedState();
@@ -228,7 +228,7 @@ function keyPressed() {
       break;
     }
     case "l":
-      pMapper.load("maps/left/map.json", () => {
+      loadWallMap("left", () => {
         syncParentingLockFromLoadedState();
       });
       break;
