@@ -288,13 +288,13 @@ const SCENES = [
   },
   {
     name: "lookinTv",
-    duration: 45000,
+    duration: LOOKIN_TV_DURATION, // js/lookinTv.js - ends 15s after the text is written
     init: initLookinTv, // js/lookinTv.js - restarts the power-on sequence
     update: () => {},
     draw: (pg) => pg.background(0),
-    // Paintings power on one at a time like old TVs onto static, the static
-    // fades out on all of them together, "I SEE YOU LOOKIN" is written across
-    // them, then each carries on through the "lookin" loop on its own timer.
+    // Paintings power on one at a time like old TVs onto white static, hold,
+    // the static fades out on all of them together, then "I SEE YOU LOOKIN"
+    // is written across them and held until the scene ends.
     paintingState: "lookinTv",
     butterflyState: "off",
   },
