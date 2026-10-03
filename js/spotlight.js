@@ -3,8 +3,8 @@
  * semi-transparent outer halo, two concentric circles - zig-zagging across
  * the wall. Each travels on a fixed diagonal and reflects off the WALL_BOUNDS
  * edges (sharp corners, no easing), so its path reads as a zig-zag rather
- * than a wander. The lights also bounce off each other the same way (see
- * separateSpotlights()) so they don't drift into a clump.
+ * than a wander. The lights pass straight through each other where their
+ * paths cross.
  *
  * Rendered by a fragment shader into one low-res WEBGL buffer, same raw
  * createShader()/quad() plumbing as js/fluidFall.js (see its header for why
@@ -32,7 +32,6 @@ const SPOTLIGHT_OUTER_ALPHA = 0.35; // 0-1, the semi-transparent halo
 const SPOTLIGHT_EDGE_SOFTNESS = 0.12; // fraction of the outer radius each soft edge ramps over
 const SPOTLIGHT_SPEED = 3; // px/frame along the diagonal
 const SPOTLIGHT_ANGLE = 0.5; // radians off horizontal - steeper = tighter zig-zag
-const SPOTLIGHT_SEPARATION = 0.6; // fraction of WALL_BOUNDS.h - centers closer than this bounce apart
 
 const SPOTLIGHT_TRAIL_EVERY = 6; // frames between trail samples
 const SPOTLIGHT_TRAIL_LENGTH = 30; // samples kept per light (~3s at 60fps)
@@ -142,29 +141,6 @@ function updateSpotlight() {
     if (sample) {
       s.trail.push({ x: s.x, y: s.y });
       if (s.trail.length > SPOTLIGHT_TRAIL_LENGTH) s.trail.shift();
-    }
-  }
-  separateSpotlights();
-}
-
-// Any two lights closer than SPOTLIGHT_SEPARATION turn to head directly away
-// from each other on both axes - same sharp, speed-preserving flip as a wall
-// bounce, so the zig-zag angle never changes.
-function separateSpotlights() {
-  const minDist = SPOTLIGHT_SEPARATION * WALL_BOUNDS.h;
-  for (let i = 0; i < spotlights.length; i++) {
-    for (let j = i + 1; j < spotlights.length; j++) {
-      const a = spotlights[i];
-      const b = spotlights[j];
-      const dx = a.x - b.x;
-      const dy = a.y - b.y;
-      if (dx * dx + dy * dy >= minDist * minDist) continue;
-      const sx = dx >= 0 ? 1 : -1;
-      const sy = dy >= 0 ? 1 : -1;
-      a.vx = sx * Math.abs(a.vx);
-      b.vx = -sx * Math.abs(b.vx);
-      a.vy = sy * Math.abs(a.vy);
-      b.vy = -sy * Math.abs(b.vy);
     }
   }
 }
