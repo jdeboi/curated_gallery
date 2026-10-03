@@ -29,6 +29,19 @@
  * showed up as a framerate drop on the right wall's 13-painting/3-panel
  * config.
  */
+// Painting outlines are switched off for now - every painting draw goes
+// through drawPaintingShape() below, which drops the stroke while this is
+// false, so "outline" reads the same as "off" (plain black). Set it back to
+// true to bring the white outlines back everywhere. Wing sculptures
+// (js/outlines.js) and mirror masks keep theirs regardless.
+const PAINTING_OUTLINES = false;
+
+// drawLightShape() (js/lightState.js) for a painting - see PAINTING_OUTLINES.
+function drawPaintingShape(pg, poly, resolved, opts) {
+  if (!PAINTING_OUTLINES) resolved = { ...resolved, strokeAlpha: 0 };
+  drawLightShape(pg, poly, resolved, opts);
+}
+
 let _paintingPolygonsCache = null;
 let _paintingPolygonsCacheFrame = -1;
 
@@ -336,11 +349,11 @@ function drawCurtainPaintingsUsing(pg, polygons, collapsePolygon) {
     // black rather than transparent everywhere else in this file: without
     // it, whatever the current scene is drawing behind the painting would
     // show through the collapsed/closed portion of the curtain.
-    drawLightShape(pg, poly, offState, { strokeWeight: 9 });
+    drawPaintingShape(pg, poly, offState, { strokeWeight: 9 });
     const fraction = groupPulseFractionFor("paintings", i);
     if (fraction > 0.001) {
       const litPoly = collapsePolygon(poly, fraction);
-      drawLightShape(pg, litPoly, litState, { strokeWeight: 9 });
+      drawPaintingShape(pg, litPoly, litState, { strokeWeight: 9 });
     }
   });
 }
@@ -408,10 +421,10 @@ function drawCurtainDownPaintings(pg, polygons) {
   const span = Math.max(Math.max(...ys) - minY, 1);
   polygons.forEach((poly, i) => {
     // Opaque black base first - see drawCurtainPaintingsUsing().
-    drawLightShape(pg, poly, offState, { strokeWeight: 9 });
+    drawPaintingShape(pg, poly, offState, { strokeWeight: 9 });
     const band = curtainDownBand((ys[i] - minY) / span);
     if (band && band.bottom - band.top > 0.001) {
-      drawLightShape(pg, paintingBandPolygon(poly, band.top, band.bottom), litState, {
+      drawPaintingShape(pg, paintingBandPolygon(poly, band.top, band.bottom), litState, {
         strokeWeight: 9,
       });
     }
@@ -431,7 +444,7 @@ function drawRandomFadePaintings(pg, polygons, lowMode) {
   const onKeyframe = lightStateKeyframe("filled");
   polygons.forEach((poly, i) => {
     const resolved = crossfadeKeyframes(lowKeyframe, onKeyframe, curtainOpenFraction(i));
-    drawLightShape(pg, poly, resolved, { strokeWeight: 9 });
+    drawPaintingShape(pg, poly, resolved, { strokeWeight: 9 });
   });
 }
 
@@ -621,7 +634,7 @@ function drawPaintingsWithFractions(pg, polygons, fractions) {
   const offKeyframe = lightStateKeyframe("off");
   polygons.forEach((poly, i) => {
     const resolved = crossfadeKeyframes(offKeyframe, onKeyframe, fractions[i]);
-    drawLightShape(pg, poly, resolved, { strokeWeight: 9 });
+    drawPaintingShape(pg, poly, resolved, { strokeWeight: 9 });
   });
 }
 
@@ -680,7 +693,7 @@ function drawPulsePaintings(pg, polygons) {
       onKeyframe,
       paintingPulseFraction(t)
     );
-    drawLightShape(pg, poly, resolved, { strokeWeight: 9 });
+    drawPaintingShape(pg, poly, resolved, { strokeWeight: 9 });
   });
 }
 
@@ -757,7 +770,7 @@ function drawGroupPulsePaintings(pg, polygons) {
   polygons.forEach((poly, i) => {
     const fraction = groupPulseFractionFor("paintings", i);
     const resolved = crossfadeKeyframes(offKeyframe, onKeyframe, fraction);
-    drawLightShape(pg, poly, resolved, { strokeWeight: 9 });
+    drawPaintingShape(pg, poly, resolved, { strokeWeight: 9 });
   });
 }
 
@@ -775,7 +788,7 @@ function drawMyceliumRevealPaintings(pg, polygons) {
   polygons.forEach((poly, i) => {
     const fraction = myceliumPaintingRevealFraction(i);
     const resolved = crossfadeKeyframes(offKeyframe, onKeyframe, fraction);
-    drawLightShape(pg, poly, resolved, { strokeWeight: 9 });
+    drawPaintingShape(pg, poly, resolved, { strokeWeight: 9 });
   });
 }
 
@@ -789,7 +802,7 @@ function drawPaintings(pg) {
     const offState = resolveLightState("outline");
     polygons.forEach((poly, i) => {
       const on = litIndices.has(i);
-      drawLightShape(pg, poly, on ? onState : offState, { strokeWeight: 9 });
+      drawPaintingShape(pg, poly, on ? onState : offState, { strokeWeight: 9 });
     });
     return;
   }
@@ -818,7 +831,7 @@ function drawPaintings(pg) {
   const resolved = resolveLightState(stateValue);
 
   polygons.forEach((poly) => {
-    drawLightShape(pg, poly, resolved, { strokeWeight: 9 });
+    drawPaintingShape(pg, poly, resolved, { strokeWeight: 9 });
   });
 }
 

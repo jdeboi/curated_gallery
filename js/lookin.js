@@ -324,7 +324,7 @@ function drawLookinPaintings(pg, polygons) {
     const { outline, fill, writeT } = lookinPhase(elapsed - startDelay, i);
     const base = crossfadeKeyframes(offKeyframe, outlineKeyframe, outline);
     const resolved = crossfadeKeyframes(base, onKeyframe, fill);
-    drawLightShape(pg, poly, resolved, { strokeWeight: LOOKIN_OUTLINE_WEIGHT });
+    drawPaintingShape(pg, poly, resolved, { strokeWeight: LOOKIN_OUTLINE_WEIGHT });
     if (writeT !== null) drawLookinText(pg, poly, writeT);
   });
 }
